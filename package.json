@@ -12,7 +12,8 @@
     "build": "pnpm build:backend && pnpm build:client",
     "build:backend": "tsc -p backend/tsconfig.build.json",
     "build:client": "next build client",
-    "start:backend": "node backend/dist/index.js",
+    "start": "concurrently \"pnpm start:backend\" \"pnpm start:client\"",
+    "start:backend": "node backend/dist/backend/src/index.js",
     "start:client": "next start client",
     "lint": "next lint client"
   },

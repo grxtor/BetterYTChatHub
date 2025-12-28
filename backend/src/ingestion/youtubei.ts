@@ -17,7 +17,7 @@ export type ContinuationState = {
 
 export type ChatEventEmitter = EventEmitter<{
   message: (message: ChatMessage) => void;
-  poll: (poll: Poll) => void;
+  poll: (poll: Poll | null) => void;
   error: (error: unknown) => void;
 }>;
 
@@ -70,7 +70,7 @@ export async function bootstrapInnertube(videoId: string): Promise<IngestionCont
 
   console.log('[Ingestion] Fetching video info...');
   const info = await client.getInfo(videoId);
-  
+
   console.log('[Ingestion] Getting live chat...');
   const liveChat = info.getLiveChat();
 
@@ -191,7 +191,7 @@ function resolveTimestamp(timestamp: number | string | undefined): string {
   }
 
   const numeric = typeof timestamp === 'string' ? Number(timestamp) : timestamp;
-  
+
   if (Number.isFinite(numeric)) {
     // YouTube timestamps are in microseconds (16 digits) or milliseconds (13 digits)
     // If it's microseconds (>= 1e15), divide by 1000 to get milliseconds
@@ -207,7 +207,7 @@ function resolveTimestamp(timestamp: number | string | undefined): string {
       // Fallback for smaller numbers
       millis = numeric;
     }
-    
+
     return new Date(millis).toISOString();
   }
 
@@ -216,13 +216,13 @@ function resolveTimestamp(timestamp: number | string | undefined): string {
 
 function extractBadges(item: any): Badge[] {
   const badges: Badge[] = [];
-  
+
   if (!item.author?.badges) return badges;
 
   for (const badge of item.author.badges) {
     const label = badge.tooltip ?? badge.label ?? '';
     const imageUrl = badge.custom_thumbnail?.[0]?.url;
-    
+
     if (label.toLowerCase().includes('moderator')) {
       badges.push({ type: 'moderator', label, imageUrl });
     } else if (label.toLowerCase().includes('member')) {
@@ -239,14 +239,14 @@ function extractBadges(item: any): Badge[] {
 
 function extractBadgesFromHeader(header: any): Badge[] {
   const badges: Badge[] = [];
-  
+
   if (!header?.author_badges) return badges;
 
   for (const badge of header.author_badges) {
     const label = badge.tooltip ?? '';
     const iconType = badge.icon_type ?? '';
     const imageUrl = badge.custom_thumbnail?.[0]?.url;
-    
+
     if (label.toLowerCase().includes('moderator') || iconType === 'MODERATOR') {
       badges.push({ type: 'moderator', label, imageUrl });
     } else if (label.toLowerCase().includes('member')) {
@@ -266,7 +266,7 @@ function extractBadgesFromHeader(header: any): Badge[] {
 function extractLeaderboardRank(item: any): number | undefined {
   // Check for before_content_buttons array (where leaderboard badge appears)
   if (!Array.isArray(item.before_content_buttons)) return undefined;
-  
+
   for (const button of item.before_content_buttons) {
     // Look for CROWN icon (leaderboard indicator)
     if (button.icon_name === 'CROWN' && button.title) {
@@ -277,7 +277,7 @@ function extractLeaderboardRank(item: any): number | undefined {
       }
     }
   }
-  
+
   return undefined;
 }
 
@@ -337,7 +337,7 @@ function extractSuperChatInfo(item: any): SuperChatInfo | undefined {
       amount = amountText;
     }
   }
-  
+
   // If we still don't have an amount, use a default
   if (!amount) {
     amount = 'Super Chat';
@@ -358,7 +358,7 @@ function extractSuperChatInfo(item: any): SuperChatInfo | undefined {
   // Extract super sticker image URL if present
   let stickerUrl: string | undefined;
   let stickerAlt: string | undefined;
-  
+
   if (Array.isArray(item.sticker) && item.sticker.length > 0) {
     // Prefer larger image (first in array is usually largest)
     const stickerThumb = item.sticker[0];
@@ -373,7 +373,7 @@ function extractSuperChatInfo(item: any): SuperChatInfo | undefined {
       }
       stickerUrl = url;
     }
-    
+
     // Extract accessibility label for alt text
     if (item.sticker_accessibility_label) {
       stickerAlt = String(item.sticker_accessibility_label);
@@ -400,16 +400,16 @@ function normalizeAction(action: any): ChatMessage | null {
   // Normalize various live chat events
   const itemType = String(item.type || '').trim();
   const messageText = resolveMessageText(item).toLowerCase();
-  
+
   const isText = itemType === 'LiveChatTextMessage';
   const isPaid = !!extractSuperChatInfo(item);
   const isMembership = itemType === 'LiveChatMembershipItem';
   const isGiftPurchase = itemType === 'LiveChatSponsorshipsGiftPurchaseAnnouncement';
   const isGiftReceived = itemType === 'LiveChatSponsorshipsGiftRedemptionAnnouncement';
-  
+
   // Check if the message text indicates it's a gift recipient message
-  const isGiftRecipientMessage = 
-    messageText.includes('received a gift membership') || 
+  const isGiftRecipientMessage =
+    messageText.includes('received a gift membership') ||
     messageText.includes('received a membership gift') ||
     messageText.includes('received a gift') ||
     /received\s+a\s+.*membership.*by/i.test(messageText);
@@ -426,7 +426,7 @@ function normalizeAction(action: any): ChatMessage | null {
     const isModerator = badges.some(b => b.type === 'moderator');
     const isMember = badges.some(b => b.type === 'member');
     const isVerified = badges.some(b => b.type === 'verified');
-    
+
     // Extract membership level for new members, upgrades, and milestones
     let membershipLevel: string | undefined;
     if (isMembership) {
@@ -452,7 +452,7 @@ function normalizeAction(action: any): ChatMessage | null {
     } else if (isPaid) {
       membershipLevel = undefined;
     }
-    
+
     // Extract gift count for gift purchases
     let giftCount: number | undefined;
     if (isGiftPurchase) {
@@ -463,21 +463,21 @@ function normalizeAction(action: any): ChatMessage | null {
         giftCount = parseInt(countMatch[1], 10);
       }
     }
-    
+
     // Extract channel ID - for gifts it's in author_external_channel_id
-    const authorChannelId = isGiftPurchase 
-      ? item.author_external_channel_id 
+    const authorChannelId = isGiftPurchase
+      ? item.author_external_channel_id
       : item.author?.id;
-    
+
     // Extract author name and photo
     const authorName = isGiftPurchase
       ? (item.header?.author_name?.text || 'Unknown')
       : String(item.author?.name ?? 'Unknown');
-    
+
     const authorPhoto = isGiftPurchase
       ? item.header?.author_photo?.[0]?.url
       : item.author?.thumbnails?.[0]?.url;
-    
+
     // Build text with fallback: if no user message, show header subtext/primary for membership events
     const resolvedText = resolveMessageText(item);
     const membershipFallbackText = isMembership

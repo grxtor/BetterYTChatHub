@@ -1,55 +1,121 @@
-# YouTube Live Chat Client (WIP)
+# BetterYTChatHub 🚀
 
-Build a desktop-operated, open-source YouTube Live chat client that delivers a fast, reliable stream of messages and allows a streamer to spotlight a selected chat message on an OBS-ready overlay.
+> **Yüksek Performanslı YouTube Canlı Yayın Sohbet Yönetimi ve Overlay Sistemi.**
 
-Currently work in progress bugs might be there.
+Canlı yayınlarınızı hız, netlik ve derinlemesine özelleştirme için tasarlanmış profesyonel düzeyde bir panel ile güçlendirin. BetterYTChatHub, YouTube Live sohbetini prodüksiyon kalitesinde OBS overlay'leri ile kusursuz bir şekilde birleştirir.
 
-## Key Features
+---
 
-- **High-Performance Chat**: A sleek, minimal dashboard for monitoring YouTube Live chat in real-time.
-- **OBS Integration**: Select any message to instantly display it on an OBS-ready overlay.
-- **Rich Message Support**: Full support for Super Chats, gifted memberships, and user badges.
-- **Compact and Efficient**: A dark, minimalist UI designed to be space-efficient and easy on the eyes.
-- **Intelligent Auto-Scroll**: The chat automatically scrolls to new messages but stops when you scroll up to read previous messages.
+## 📸 Arayüz Önizlemesi
 
-## Getting Started
+| Dashboard Genel Bakış | Gelişmiş Ayarlar | Özel Overlay'ler | Hassas Metin Seçimi |
+|:---:|:---:|:---:|:---:|
+| ![Dashboard Overview](https://github.com/grxtor/BetterYTChatHub/blob/master/ScreenShots/Ekran%20Resmi%202026-12-31%2014.14.03.png?raw=true) | ![Advanced Settings](https://github.com/grxtor/BetterYTChatHub/blob/master/ScreenShots/Ekran%20Resmi%202026-12-31%2014.22.52.png?raw=true)| ![Custom Overlays](https://github.com/grxtor/BetterYTChatHub/blob/master/ScreenShots/Ekran%20Resmi%202026-12-31%2014.12.37.png?raw=true) | ![Text Selection](https://github.com/grxtor/BetterYTChatHub/blob/master/ScreenShots/Ekran%20Resmi%202026-12-31%2014.20.28.png?raw=true) |
 
-Follow these instructions to set up the project for local development.
+---
 
-### Prerequisites
+## ✨ Öne Çıkan Özellikler
 
-- [Node.js](https://nodejs.org/) (v20.x or later)
-- [pnpm](https://pnpm.io/)
+### 🖱️ Hassas Metin Seçimi (ÖZEL)
+Standart YouTube sohbet arayüzünün kısıtlamalarından kurtulun.
+- **Kolay Kopyalama**: Dashboard üzerindeki herhangi bir mesajı (normal mesaj, üye mesajı veya Super Chat) anında seçebilir ve kopyalayabilirsiniz.
+- **Hızlı Etkileşim**: Seçtiğiniz metinleri üzerinde işlem yapmak, araştırmak veya hızlı yanıtlar oluşturmak için kullanabilirsiniz.
 
-### Installation
+---
 
-1.  **Clone the repository:**
+## 💡 Neden BetterYTChatHub?
 
+Bir yayıncı olarak canlı sohbeti yönetmek kaotik olabilir. Standart YouTube arayüzü genellikle kalabalıktır ve belirli mesajlara odaklanmayı zorlaştırır. **BetterYTChatHub** bu boşluğu şu avantajlarla doldurur:
+
+*   **Akıcı Etkileşim**: Mesaj arama zahmetine son. Sadece önemli olana odaklanan özel bir panel.
+*   **Prodüksiyon Kalitesi**: Profesyonel TV yayınlarındaymış gibi hissettiren üst düzey overlay tasarımları.
+*   **Bağımsız Çalışma**: Ana YouTube sekmenizi etkilemez; maksimum kararlılık için bağımsız çalışır.
+
+---
+
+## ✨ Temel Kabiliyetler
+
+### 🎯 Mesaj Odaklama (Tek Tıkla)
+Cihazınızdaki herhangi bir mesajı, Super Chat'i veya Üyelik uyarısını anında OBS overlay'inde vurgulayın.
+- **Akıllı Kuyruk**: Mevcut vurgulanan mesajı yenisiyle sorunsuz bir şekilde değiştirin.
+- **Otomatik Seçim**: Destekçilerinizin asla gözden kaçmaması için Super Chat ve Üyeler için "Otomatik Seç" özelliğini aktif edin.
+
+### 📋 Yayıncı İş Akışı Verimliliği
+- **Tek Tıkla URL Kopyalama**: OBS overlay URL'lerini doğrudan panelden hızlıca kopyalayın.
+- **Global Durum İzleme**: Backend API bağlantı durumunu doğrudan başlıktan takip edin.
+
+### 📐 Dinamik Ölçeklendirme ve Çözünürlük
+- **Çözünürlük Bağımsızlığı**: Overlay'ler yüksek DPI uyumludur. Herhangi bir yayın çözünürlüğüne (720p'den 4K+'ya) sığması için ölçeklendirme sürgülerini kullanın.
+- **Bağımsız Yerleşim**: Normal sohbeti, Super Chat'leri ve Üyeleri ekranın farklı köşelerine yerleştirmek için her kategoriye özel konumlandırma ayarlarını kullanın.
+
+### 🎨 Profesyonel Özelleştirme Motoru
+- **Gelişmiş Tasarım**: Uzun kullanıcı adlarını bile profesyonelce yöneten, ad ve miktar istifleme sistemine sahip özel tasarım.
+- **Canlı Gradyanlar**: Üyelik uyarıları için benzersiz başlangıç/bitiş renk kontrolleri.
+- **CSS Müdahalesi**: İleri düzey kullanıcılar için her mesaj kategorisine özel CSS enjekte etme imkanı.
+
+---
+
+## 🛠️ Teknoloji Yığını
+
+| Katman | Teknoloji |
+|:---|:---|
+| **Frontend Framework** | [Next.js 15](https://nextjs.org/) (React 19) |
+| **Backend Engine** | [Node.js](https://nodejs.org/) + [Fastify](https://www.fastify.io/) |
+| **Desktop Wrapper** | [Electron](https://www.electronjs.org/) |
+| **Veri Tipleri** | TypeScript / Zod |
+| **Styling** | El Yapımı Vanilla CSS |
+
+---
+
+## 🚀 Başlangıç
+
+### Ön Gereksinimler
+
+- [Node.js](https://nodejs.org/) (v20.x veya üzeri)
+- [pnpm](https://pnpm.io/) (Önerilen) veya `npm`
+
+### Kurulum ve Çalıştırma
+
+1.  **Projeyi Klonlayın:**
     ```bash
-    git clone https://github.com/yusufipk/YTChatHub
-    cd YTChatHub
+    git clone https://github.com/grxtor/BetterYTChatHub.git
+    cd BetterYTChatHub
     ```
 
-2.  **Install dependencies:**
-
+2.  **Bağımlılıkları Yükleyin:**
     ```bash
     pnpm install
+    # veya
+    npm install
     ```
 
-### Running the Application
+3.  **Geliştirme Modunda Başlatın:**
+    Hem backend hem de frontend'i aynı anda başlatmak için:
+    ```bash
+    pnpm dev
+    # veya
+    npm run dev
+    ```
 
-To start the development server for both the backend and frontend, run:
+4.  **Uygulamayı Paketleyin (Opsiyonel):**
+    Electron ile masaüstü uygulaması olarak paketlemek için:
+    ```bash
+    pnpm build
+    ```
 
-```bash
-pnpm dev
-```
+---
 
-- The dashboard will be available at `http://localhost:3000/dashboard`.
-- The OBS overlay will be available at `http://localhost:3000/overlay`.
+## 📡 Erişim Noktaları
 
-## Technology Stack
+| Bileşen | Yerel URL |
+|:---|:---|
+| **Dashboard** | `http://localhost:3000/dashboard` |
+| **Ana Overlay** | `http://localhost:3000/overlay` |
+| **Üyeler Overlay** | `http://localhost:3000/members` |
+| **Super Chat Overlay** | `http://localhost:3000/superchat` |
 
-- **Frontend**: [Next.js](https://nextjs.org/) (React)
-- **Backend**: [Node.js](https://nodejs.org/) with [Fastify](https://www.fastify.io/) and [tsx](https://github.com/esbuild-kit/tsx)
-- **YouTube Integration**: [youtubei.js](https://github.com/LuanRT/YouTube.js)
-- **Styling**: Handcrafted CSS
+---
+
+## 📄 Lisans
+
+Bu proje **MIT Lisansı** ile lisanslanmıştır.

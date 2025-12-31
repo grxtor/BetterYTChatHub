@@ -3,6 +3,7 @@ import cors from '@fastify/cors';
 import EventEmitter from 'eventemitter3';
 import type { ChatMessage, Poll } from '@shared/chat';
 import { bootstrapInnertube, type IngestionContext } from './ingestion/youtubei';
+import { seedMockMessages, trimMessages } from './mockData.js';
 import crypto from 'crypto';
 
 const MAX_MESSAGES = 500;
@@ -33,6 +34,8 @@ export async function startBackend() {
   let currentPoll: Poll | null = null;
   const overlayEmitter = new EventEmitter<{ update: (message: ChatMessage | null) => void }>();
   const pollEmitter = new EventEmitter<{ update: (poll: Poll | null) => void }>();
+  const settingsEmitter = new EventEmitter<{ update: (settings: any) => void }>();
+  let currentSettings: any = null;
 
   const rawLiveId = process.env.YOUTUBE_LIVE_ID ?? '';
   const parsedLiveId = extractLiveId(rawLiveId);
@@ -49,7 +52,6 @@ export async function startBackend() {
       ingestion.emitter.on('message', (message) => {
         store.push(message);
         // Trim regularly to keep regular messages under control
-        // This ensures we don't wait until hitting MAX_MESSAGES
         trimMessages(store);
       });
       ingestion.emitter.on('poll', (poll) => {
@@ -119,8 +121,6 @@ export async function startBackend() {
 
       ingestion.emitter.on('message', (message) => {
         store.push(message);
-        // Trim regularly to keep regular messages under control
-        // This ensures we don't wait until hitting MAX_MESSAGES
         trimMessages(store);
       });
 
@@ -151,13 +151,13 @@ export async function startBackend() {
       }
       ingestion = null;
     }
-    
+
     // Start mock messages again
     if (!mockInterval) {
       mockInterval = seedMockMessages(store, overlayEmitter);
       console.log('[Backend] Started mock messages');
     }
-    
+
     store.length = 0;
     currentSelection = null;
     overlayEmitter.emit('update', null);
@@ -230,6 +230,13 @@ export async function startBackend() {
     });
   });
 
+  fastify.post('/settings/update', async (request, reply) => {
+    const settings = request.body;
+    currentSettings = settings;
+    settingsEmitter.emit('update', settings);
+    return { success: true };
+  });
+
   fastify.get('/overlay/stream', async (request, reply) => {
     reply.hijack();
 
@@ -247,11 +254,20 @@ export async function startBackend() {
       res.write(`event: selection\ndata: ${JSON.stringify({ message })}\n\n`);
     };
 
+    const sendSettings = (settings: any) => {
+      res.write(`event: settings\ndata: ${JSON.stringify(settings)}\n\n`);
+    };
+
+    overlayEmitter.on('update', send);
+    settingsEmitter.on('update', sendSettings);
+
     const heartbeat = setInterval(() => {
       res.write('event: heartbeat\ndata: {}\n\n');
     }, 15000);
 
-    overlayEmitter.on('update', send);
+    if (currentSettings) {
+      sendSettings(currentSettings);
+    }
 
     if (currentSelection) {
       send(currentSelection);
@@ -260,13 +276,14 @@ export async function startBackend() {
     request.raw.on('close', () => {
       clearInterval(heartbeat);
       overlayEmitter.off('update', send);
+      settingsEmitter.off('update', sendSettings);
     });
   });
 
   // Image proxy endpoint to avoid YouTube CDN rate limits
   fastify.get<{ Querystring: { url: string } }>('/proxy/image', async (request, reply) => {
     const { url } = request.query;
-    
+
     if (!url || typeof url !== 'string') {
       reply.status(400);
       return { error: 'url parameter is required' };
@@ -274,8 +291,8 @@ export async function startBackend() {
 
     // Only allow YouTube CDN and Google User Content domains
     const allowedDomains = [
-      'yt3.ggpht.com', 
-      'yt4.ggpht.com', 
+      'yt3.ggpht.com',
+      'yt4.ggpht.com',
       'i.ytimg.com',
       'lh3.googleusercontent.com' // For super stickers
     ];
@@ -292,7 +309,7 @@ export async function startBackend() {
 
     // Create cache key from URL
     const cacheKey = crypto.createHash('md5').update(url).digest('hex');
-    
+
     // Check cache
     const cached = imageCache.get(cacheKey);
     if (cached && (Date.now() - cached.timestamp) < CACHE_TTL) {
@@ -349,7 +366,7 @@ export async function startBackend() {
       return reply.send(buffer);
     } catch (error) {
       console.error('[Backend] Failed to proxy image:', error);
-      
+
       // Try to return stale cache if available
       if (cached) {
         reply.header('Content-Type', cached.contentType);
@@ -357,7 +374,7 @@ export async function startBackend() {
         reply.header('Access-Control-Allow-Origin', '*');
         return reply.send(cached.buffer);
       }
-      
+
       reply.status(500);
       return { error: 'Failed to fetch image' };
     }
@@ -383,94 +400,12 @@ function extractLiveId(input: string): string {
     if (url.searchParams.has('v')) {
       return url.searchParams.get('v') ?? '';
     }
-    const pathname = url.pathname.split('/').filter(Boolean).pop();
-    return pathname ?? '';
-  } catch (error) {
-    console.warn('Invalid YOUTUBE_LIVE_ID provided', error);
-    return '';
-  }
-}
-
-/**
- * Intelligently trim messages while preserving superchats and memberships
- * Regular messages are limited to MAX_REGULAR_MESSAGES
- * Superchats and memberships are preserved for the entire session
- */
-function trimMessages(store: ChatMessage[]): void {
-  // Count messages by type
-  let regularCount = 0;
-  const specialIndices: number[] = [];
-  
-  for (let i = 0; i < store.length; i++) {
-    const message = store[i];
-    const isSpecial = message.superChat || message.membershipGift || 
-                     message.membershipGiftPurchase || message.isMember;
-    if (isSpecial) {
-      specialIndices.push(i);
-    } else {
-      regularCount++;
+    if (url.pathname.startsWith('/live/')) {
+      return url.pathname.split('/live/')[1] ?? '';
     }
+  } catch (e) {
+    // try other patterns if URL parsing fails
   }
-  
-  // Only trim if we have too many regular messages
-  if (regularCount > MAX_REGULAR_MESSAGES) {
-    const toRemove = regularCount - MAX_REGULAR_MESSAGES;
-    const specialSet = new Set(specialIndices);
-    
-    // Remove oldest regular messages (keep special messages)
-    let removed = 0;
-    const newStore: ChatMessage[] = [];
-    
-    for (let i = 0; i < store.length; i++) {
-      const isSpecial = specialSet.has(i);
-      
-      if (isSpecial) {
-        // Always keep special messages
-        newStore.push(store[i]);
-      } else {
-        // Keep regular messages if we haven't removed enough yet
-        if (removed < toRemove) {
-          removed++;
-          // Skip this message (delete it)
-        } else {
-          newStore.push(store[i]);
-        }
-      }
-    }
-    
-    // Replace store contents
-    store.length = 0;
-    store.push(...newStore);
-  }
-}
 
-function seedMockMessages(
-  store: ChatMessage[],
-  overlayEmitter: EventEmitter<{ update: (message: ChatMessage | null) => void }>
-): NodeJS.Timeout {
-  let counter = 0;
-  const authors = ['Ada', 'Linus', 'Grace', 'Marge'];
-  return setInterval(() => {
-    const message: ChatMessage = {
-      id: `mock-${Date.now()}`,
-      author: authors[counter % authors.length],
-      text: `Mock message #${counter}`,
-      publishedAt: new Date().toISOString()
-    };
-    store.push(message);
-    // Trim regularly to keep regular messages under control
-    trimMessages(store);
-    if (counter % 5 === 0) {
-      overlayEmitter.emit('update', message);
-    }
-    counter += 1;
-  }, 2000);
-}
-
-// Only run if this is the main module
-if (require.main === module) {
-  startBackend().catch((error) => {
-    console.error('Failed to start backend', error);
-    process.exit(1);
-  });
+  return '';
 }

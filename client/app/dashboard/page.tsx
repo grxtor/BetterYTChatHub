@@ -1,16 +1,30 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
-import type { ChatMessage, Poll } from '@shared/chat';
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type MouseEvent,
+} from 'react';
+import type { ChatMessage } from '@shared/chat';
+import { DEFAULT_APP_SETTINGS, type AppSettings } from '@shared/settings';
 import { useTimezone } from '../../lib/TimezoneContext';
 import { formatTimestamp } from '../../lib/timezone';
 import { proxyImageUrl } from '../../lib/imageProxy';
-import { useRouter } from 'next/navigation';
+import {
+  loadStoredSettings,
+  normalizeSettings,
+  settingsAreEqual,
+  subscribeToSettingsChanges,
+} from '../../lib/appSettings';
+import { applyAppTheme } from '../../lib/appTheme';
+import { BACKEND_URL } from '../../lib/runtime';
 import TopBar from '../components/TopBar';
-// import SettingsView from '../components/SettingsView'; // Unused now
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://localhost:4100';
-const OVERLAY_PORT = 4100;
 const POLL_INTERVAL = 2500;
 
 let globalSSEConnection: EventSource | null = null;
@@ -20,11 +34,17 @@ let globalConnectionListeners: Set<(payload: any) => void> = new Set();
  * CUSTOM HOOKS
  */
 
-function useChatMessages() {
+function useChatMessages(enabled: boolean) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [error, setError] = useState<Error | null>(null);
 
   const refresh = useCallback(async () => {
+    if (!enabled) {
+      setMessages([]);
+      setError(null);
+      return;
+    }
+
     try {
       const response = await fetch(`${BACKEND_URL}/chat/messages`);
       if (!response.ok) throw new Error(`Request failed: ${response.status}`);
@@ -34,22 +54,36 @@ function useChatMessages() {
     } catch (err) {
       setError(err as Error);
     }
-  }, []);
+  }, [enabled]);
 
   useEffect(() => {
     refresh();
+    if (!enabled) {
+      return;
+    }
+
     const timer = setInterval(refresh, POLL_INTERVAL);
     return () => clearInterval(timer);
-  }, [refresh]);
+  }, [enabled, refresh]);
 
   return { messages, refresh, error };
 }
 
-function useOverlaySelection() {
+function useOverlaySelection(enabled: boolean) {
   const [selection, setSelection] = useState<ChatMessage | null>(null);
   const listenerRef = useRef<((payload: any) => void) | null>(null);
 
   useEffect(() => {
+    if (!enabled) {
+      if (globalSSEConnection) {
+        globalSSEConnection.close();
+        globalSSEConnection = null;
+      }
+      globalConnectionListeners.clear();
+      setSelection(null);
+      return;
+    }
+
     if (!globalSSEConnection) {
       globalSSEConnection = new EventSource(`${BACKEND_URL}/overlay/stream`);
       globalSSEConnection.addEventListener('selection', ((event: MessageEvent) => {
@@ -74,7 +108,7 @@ function useOverlaySelection() {
         globalConnectionListeners.delete(listenerRef.current);
       }
     };
-  }, []);
+  }, [enabled]);
 
   return { selection };
 }
@@ -83,15 +117,22 @@ function useConnection() {
   const [connected, setConnected] = useState(false);
   const [liveId, setLiveId] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
+  const [backendAvailable, setBackendAvailable] = useState(false);
 
   const checkStatus = useCallback(async () => {
     try {
       const response = await fetch(`${BACKEND_URL}/health`);
+      if (!response.ok) {
+        throw new Error(`Health request failed: ${response.status}`);
+      }
       const data = await response.json();
+      setBackendAvailable(true);
       setConnected(data.connected);
       setLiveId(data.liveId);
-    } catch (error) {
-      console.error(error);
+    } catch {
+      setBackendAvailable(false);
+      setConnected(false);
+      setLiveId(null);
     }
   }, []);
 
@@ -102,6 +143,11 @@ function useConnection() {
   }, [checkStatus]);
 
   const connect = useCallback(async (liveId: string) => {
+    if (!backendAvailable) {
+      alert('Backend is not running. Start the backend and try again.');
+      return;
+    }
+
     setConnecting(true);
     try {
       const response = await fetch(`${BACKEND_URL}/chat/connect`, {
@@ -111,23 +157,25 @@ function useConnection() {
       });
       if (!response.ok) throw new Error('Failed');
       await checkStatus();
-    } catch (error) {
+    } catch {
       alert('Failed to connect');
     } finally {
       setConnecting(false);
     }
-  }, [checkStatus]);
+  }, [backendAvailable, checkStatus]);
 
   const disconnect = useCallback(async () => {
     try {
       await fetch(`${BACKEND_URL}/chat/disconnect`, { method: 'POST' });
       await checkStatus();
-    } catch (error) {
-      console.error(error);
+    } catch {
+      setBackendAvailable(false);
+      setConnected(false);
+      setLiveId(null);
     }
   }, [checkStatus]);
 
-  return { connected, liveId, connect, disconnect, connecting };
+  return { backendAvailable, connected, liveId, connect, disconnect, connecting };
 }
 
 /**
@@ -140,40 +188,147 @@ const Icons = {
       <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
     </svg>
   ),
-  Check: () => (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="20 6 9 17 4 12" />
-    </svg>
-  ),
-  Settings: () => (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="3" />
-      <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
-    </svg>
-  ),
   Pin: () => (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <line x1="12" y1="17" x2="12" y2="22" />
       <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z" />
     </svg>
-  ),
-  Link: () => (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-    </svg>
-  ),
-  Disconnect: () => (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="18" y1="6" x2="6" y2="18" />
-      <line x1="6" y1="6" x2="18" y2="18" />
-    </svg>
   )
 };
+
+const DENSITY_STYLES = {
+  compact: {
+    row: 'gap-2.5 rounded-[18px] p-3',
+    avatar: 'h-10 w-10 rounded-xl',
+    fallbackAvatar: 'h-10 w-10 rounded-xl text-xs',
+    body: 'mt-1.5 text-[13px] leading-5',
+    author: 'text-[14px]',
+    timestamp: 'text-[10px]',
+    action: 'h-8 w-8 rounded-lg',
+  },
+  comfortable: {
+    row: 'gap-3 rounded-[20px] p-4',
+    avatar: 'h-11 w-11 rounded-2xl',
+    fallbackAvatar: 'h-11 w-11 rounded-2xl text-sm',
+    body: 'mt-2 text-[14px] leading-6',
+    author: 'text-[15px]',
+    timestamp: 'text-[11px]',
+    action: 'h-9 w-9 rounded-xl',
+  },
+  immersive: {
+    row: 'gap-4 rounded-[24px] p-5',
+    avatar: 'h-12 w-12 rounded-[18px]',
+    fallbackAvatar: 'h-12 w-12 rounded-[18px] text-sm',
+    body: 'mt-2.5 text-[15px] leading-7',
+    author: 'text-[16px]',
+    timestamp: 'text-xs',
+    action: 'h-10 w-10 rounded-xl',
+  },
+} as const;
+
+type DensityStyles = (typeof DENSITY_STYLES)[keyof typeof DENSITY_STYLES];
+
+function getDensityStyles(density: AppSettings['dashboardDensity']) {
+  return DENSITY_STYLES[density];
+}
+
+function getMessageKind(message: ChatMessage | null) {
+  if (!message) {
+    return 'Chat';
+  }
+
+  if (message.superChat) {
+    return 'Super Chat';
+  }
+
+  if (message.membershipGift || message.membershipGiftPurchase || message.membershipLevel) {
+    return 'Member';
+  }
+
+  return 'Chat';
+}
+
+function getMessageSearchValue(message: ChatMessage) {
+  const runText = message.runs?.map((run) => run.text || '').join(' ') ?? '';
+  return `${message.author} ${message.text ?? ''} ${runText}`.trim().toLowerCase();
+}
 
 /**
  * COMPONENTS
  */
+
+function MessageBadges({
+  message,
+  enabled = true,
+}: {
+  message: ChatMessage;
+  enabled?: boolean;
+}) {
+  if (!enabled || (!message.badges?.length && !message.leaderboardRank)) {
+    return null;
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {message.badges?.map((badge, index) => (
+        <span
+          key={`${badge.type}-${index}`}
+          className="inline-flex items-center gap-1 rounded-full border border-white/8 bg-white/6 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-app-text-secondary"
+        >
+          {badge.imageUrl ? (
+            <img
+              src={proxyImageUrl(badge.imageUrl)}
+              alt={badge.label || badge.type}
+              className="h-3.5 w-3.5 rounded-full object-cover"
+            />
+          ) : badge.icon ? (
+            <span>{badge.icon}</span>
+          ) : null}
+          <span>{badge.label || badge.type}</span>
+        </span>
+      ))}
+      {message.leaderboardRank ? (
+        <span className="inline-flex items-center gap-1 rounded-full border border-amber-400/25 bg-amber-400/12 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-amber-200">
+          <span>👑</span>
+          <span>#{message.leaderboardRank}</span>
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function MessageContent({
+  message,
+  className,
+}: {
+  message: ChatMessage;
+  className: string;
+}) {
+  if (message.runs?.length) {
+    return (
+      <p className={className}>
+        {message.runs.map((run, index) =>
+          run.emojiUrl ? (
+            <img
+              key={`${message.id}-emoji-${index}`}
+              src={proxyImageUrl(run.emojiUrl)}
+              alt={run.emojiAlt || 'emoji'}
+              className="mx-0.5 inline h-5 w-5 align-[-0.35em]"
+            />
+          ) : (
+            <span key={`${message.id}-text-${index}`}>{run.text}</span>
+          ),
+        )}
+      </p>
+    );
+  }
+
+  if (!message.text || message.text === 'N/A') {
+    return null;
+  }
+
+  return <p className={className}>{message.text}</p>;
+}
 
 function MessageRow({
   message,
@@ -181,53 +336,84 @@ function MessageRow({
   onSelect,
   onCopy,
   onFilterUser,
-  onContextMenu
+  onContextMenu,
+  densityStyles,
+  showBadges = true,
+  showAvatars = true,
+  showTimestamps = true,
 }: {
   message: ChatMessage;
   isSelected: boolean;
   onSelect: () => void;
   onCopy: (text: string) => void;
   onFilterUser: (author: string) => void;
-  onContextMenu: (e: React.MouseEvent) => void;
+  onContextMenu: (e: MouseEvent<HTMLDivElement>) => void;
+  densityStyles: DensityStyles;
+  showBadges?: boolean;
+  showAvatars?: boolean;
+  showTimestamps?: boolean;
 }) {
   const { timezone } = useTimezone();
 
   return (
     <div
-      className={`message-row ${isSelected ? 'selected' : ''}`}
+      className={`group grid border transition ${densityStyles.row} ${
+        showAvatars ? 'grid-cols-[auto_minmax(0,1fr)_auto]' : 'grid-cols-[minmax(0,1fr)_auto]'
+      } ${
+        isSelected
+          ? 'border-app-accent/45 bg-app-accent/10 shadow-[0_0_0_1px_rgba(129,140,248,0.18),0_20px_45px_rgba(15,23,42,0.45)]'
+          : 'border-white/7 bg-[linear-gradient(180deg,rgba(24,24,27,0.92),rgba(17,17,19,0.9))] hover:border-white/12 hover:bg-[linear-gradient(180deg,rgba(31,31,35,0.95),rgba(24,24,27,0.94))]'
+      }`}
       onClick={onSelect}
       onContextMenu={onContextMenu}
     >
-      {message.authorPhoto && (
+      {showAvatars && message.authorPhoto && (
         <img
           src={proxyImageUrl(message.authorPhoto)}
           alt=""
-          className="message-row__avatar"
+          className={`${densityStyles.avatar} border border-white/8 object-cover shadow-md shadow-black/40`}
         />
       )}
-      <div className="message-row__content">
-        <div className="message-row__header">
-          <span
-            className="message-row__author clickable"
+      {showAvatars && !message.authorPhoto && (
+        <div className={`grid place-items-center border border-white/8 bg-gradient-to-br from-app-accent/45 to-sky-500/30 font-semibold text-white shadow-md shadow-black/30 ${densityStyles.fallbackAvatar}`}>
+          {message.author.charAt(0).toUpperCase()}
+        </div>
+      )}
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-start gap-2">
+          <button
+            type="button"
+            className={`truncate text-left font-semibold tracking-[-0.01em] text-app-text transition hover:text-app-accent ${densityStyles.author}`}
             onClick={(e) => { e.stopPropagation(); onFilterUser(message.author); }}
             title={`Filter by ${message.author}`}
           >
             {message.author}
-          </span>
-          <span className="message-row__time">{formatTimestamp(message.publishedAt, timezone)}</span>
-          {message.superChat && (
-            <span className="message-row__badge superchat">SC</span>
-          )}
-          {(message.membershipGift || message.membershipGiftPurchase) && (
-            <span className="message-row__badge member">NEW</span>
+          </button>
+          <MessageBadges message={message} enabled={showBadges} />
+          {showTimestamps && (
+            <span className={`ml-auto shrink-0 rounded-full border border-white/8 bg-white/4 px-2 py-0.5 font-medium text-app-text-subtle ${densityStyles.timestamp}`}>
+              {formatTimestamp(message.publishedAt, timezone)}
+            </span>
           )}
         </div>
-        <p className="message-row__text">{message.text}</p>
+        <MessageContent
+          message={message}
+          className={`${densityStyles.body} text-app-text-secondary`}
+        />
       </div>
 
-      <div className="message-row__actions">
+      <div className="flex items-start gap-2 opacity-100 transition md:opacity-60 md:group-hover:opacity-100">
         <button
-          className="action-btn"
+          type="button"
+          className={`grid place-items-center border border-white/8 bg-white/4 text-app-text-muted transition hover:border-app-accent/30 hover:bg-app-accent/10 hover:text-app-text ${densityStyles.action}`}
+          onClick={(e) => { e.stopPropagation(); onSelect(); }}
+          title="Pin to overlay"
+        >
+          <Icons.Pin />
+        </button>
+        <button
+          type="button"
+          className={`grid place-items-center border border-white/8 bg-white/4 text-app-text-muted transition hover:border-app-accent/30 hover:bg-app-accent/10 hover:text-app-text ${densityStyles.action}`}
           onClick={(e) => { e.stopPropagation(); onCopy(message.text); }}
           title="Copy"
         >
@@ -241,26 +427,72 @@ function MessageRow({
 function SuperChatItem({
   message,
   isSelected,
-  onSelect
+  onSelect,
+  densityStyles,
+  showAvatars = true,
+  showTimestamps = true,
 }: {
   message: ChatMessage;
   isSelected: boolean;
   onSelect: () => void;
+  densityStyles: DensityStyles;
+  showAvatars?: boolean;
+  showTimestamps?: boolean;
 }) {
+  const { timezone } = useTimezone();
   return (
-    <div className={`superchat-item ${isSelected ? 'selected' : ''}`} onClick={onSelect}>
-      <div className="superchat-item__header">
-        {message.authorPhoto && (
-          <img src={proxyImageUrl(message.authorPhoto)} alt="" className="superchat-item__avatar" />
-        )}
-        <div className="superchat-item__info">
-          <div className="superchat-item__author">{message.author}</div>
+    <div
+      className={`rounded-3xl border p-4 transition ${
+        isSelected
+          ? 'border-amber-300/35 bg-amber-400/12 shadow-[0_0_0_1px_rgba(251,191,36,0.18)]'
+          : 'border-white/7 bg-[linear-gradient(180deg,rgba(43,32,14,0.92),rgba(24,18,10,0.9))] hover:border-amber-300/18'
+      }`}
+      onClick={onSelect}
+    >
+      <div className="flex items-start gap-3">
+        {showAvatars && message.authorPhoto ? (
+          <img
+            src={proxyImageUrl(message.authorPhoto)}
+            alt=""
+            className={`${densityStyles.avatar} border border-amber-200/10 object-cover`}
+          />
+        ) : showAvatars ? (
+          <div className={`grid place-items-center border border-amber-200/10 bg-gradient-to-br from-amber-400/35 to-orange-500/20 font-semibold text-white ${densityStyles.fallbackAvatar}`}>
+            {message.author.charAt(0).toUpperCase()}
+          </div>
+        ) : null}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <div className={`truncate font-semibold text-app-text ${densityStyles.author}`}>{message.author}</div>
+            <span className="rounded-full border border-amber-300/20 bg-amber-300/12 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-amber-100">
+              Super Chat
+            </span>
+          </div>
+          {showTimestamps ? (
+            <div className={`mt-1 text-amber-100/70 ${densityStyles.timestamp}`}>
+              {formatTimestamp(message.publishedAt, timezone)}
+            </div>
+          ) : null}
         </div>
         {message.superChat && (
-          <div className="superchat-item__amount">{message.superChat.amount}</div>
+          <div className="rounded-2xl border border-amber-300/25 bg-amber-300/12 px-3 py-1 text-sm font-semibold text-amber-50">
+            {message.superChat.amount}
+          </div>
         )}
       </div>
-      {message.text && <p className="superchat-item__text">{message.text}</p>}
+      <MessageContent
+        message={message}
+        className={`${densityStyles.body} text-amber-50/85`}
+      />
+      {message.superChat?.stickerUrl ? (
+        <div className="mt-3 rounded-2xl border border-amber-300/10 bg-black/10 p-3">
+          <img
+            src={proxyImageUrl(message.superChat.stickerUrl)}
+            alt={message.superChat.stickerAlt || 'Super sticker'}
+            className="mx-auto max-h-28 w-auto"
+          />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -268,22 +500,193 @@ function SuperChatItem({
 function MemberItem({
   message,
   isSelected,
-  onSelect
+  onSelect,
+  densityStyles,
+  showAvatars = true,
+  showTimestamps = true,
 }: {
   message: ChatMessage;
   isSelected: boolean;
   onSelect: () => void;
+  densityStyles: DensityStyles;
+  showAvatars?: boolean;
+  showTimestamps?: boolean;
 }) {
+  const { timezone } = useTimezone();
   return (
-    <div className={`member-item ${isSelected ? 'selected' : ''}`} onClick={onSelect}>
-      {message.authorPhoto && (
-        <img src={proxyImageUrl(message.authorPhoto)} alt="" className="member-item__avatar" />
-      )}
-      <div className="member-item__info">
-        <div className="member-item__name">{message.author}</div>
-        <div className="member-item__label">New Member</div>
+    <div
+      className={`rounded-3xl border p-4 transition ${
+        isSelected
+          ? 'border-emerald-300/30 bg-emerald-400/10 shadow-[0_0_0_1px_rgba(52,211,153,0.18)]'
+          : 'border-white/7 bg-[linear-gradient(180deg,rgba(8,43,31,0.82),rgba(9,24,18,0.9))] hover:border-emerald-300/18'
+      }`}
+      onClick={onSelect}
+    >
+      <div className="flex items-start gap-3">
+        {showAvatars && message.authorPhoto ? (
+          <img
+            src={proxyImageUrl(message.authorPhoto)}
+            alt=""
+            className={`${densityStyles.avatar} border border-emerald-200/10 object-cover`}
+          />
+        ) : showAvatars ? (
+          <div className={`grid place-items-center border border-emerald-200/10 bg-gradient-to-br from-emerald-400/35 to-teal-500/20 font-semibold text-white ${densityStyles.fallbackAvatar}`}>
+            {message.author.charAt(0).toUpperCase()}
+          </div>
+        ) : null}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <div className={`truncate font-semibold text-app-text ${densityStyles.author}`}>{message.author}</div>
+            <span className="rounded-full border border-emerald-300/20 bg-emerald-300/12 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-emerald-100">
+              {message.membershipGiftPurchase ? 'Gifted' : 'Member'}
+            </span>
+          </div>
+          {showTimestamps ? (
+            <div className={`mt-1 text-emerald-100/70 ${densityStyles.timestamp}`}>
+              {formatTimestamp(message.publishedAt, timezone)}
+            </div>
+          ) : null}
+        </div>
+      </div>
+      <div className={`${densityStyles.body} text-emerald-50/85`}>
+        {message.membershipGiftPurchase && message.giftCount
+          ? `${message.giftCount} gift membership${message.giftCount > 1 ? 's' : ''} sent`
+          : message.membershipLevel || 'New member alert'}
       </div>
     </div>
+  );
+}
+
+function MetricCard({
+  label,
+  value,
+  hint,
+  toneClass,
+}: {
+  label: string;
+  value: string;
+  hint: string;
+  toneClass: string;
+}) {
+  return (
+    <div className="rounded-[24px] border border-white/8 bg-[linear-gradient(180deg,rgba(24,24,27,0.94),rgba(14,14,17,0.98))] p-4 shadow-panel">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-app-text-subtle">
+        {label}
+      </div>
+      <div className={`mt-3 text-2xl font-semibold tracking-[-0.04em] ${toneClass}`}>
+        {value}
+      </div>
+      <div className="mt-1 text-sm text-app-text-muted">{hint}</div>
+    </div>
+  );
+}
+
+function SelectionPreviewCard({
+  selection,
+  densityStyles,
+  showAvatars,
+  showBadges,
+  showTimestamps,
+  onClear,
+}: {
+  selection: ChatMessage | null;
+  densityStyles: DensityStyles;
+  showAvatars: boolean;
+  showBadges: boolean;
+  showTimestamps: boolean;
+  onClear: () => void;
+}) {
+  const { timezone } = useTimezone();
+
+  return (
+    <section className="overflow-hidden rounded-[28px] border border-app-accent/18 bg-[linear-gradient(180deg,rgba(26,27,37,0.94),rgba(15,16,23,0.98))] shadow-[0_24px_60px_rgba(15,23,42,0.48)]">
+      <div className="flex items-center gap-3 border-b border-white/6 px-5 py-4">
+        <div>
+          <span className="text-xs font-semibold uppercase tracking-[0.14em] text-app-accent/80">
+            Overlay Preview
+          </span>
+          <h3 className="mt-1 text-base font-semibold text-app-text">
+            {selection ? getMessageKind(selection) : 'Pinned Message'}
+          </h3>
+        </div>
+        <div className="flex-1" />
+        {selection ? (
+          <button
+            type="button"
+            className="rounded-full border border-white/8 bg-white/5 px-3 py-1.5 text-xs font-semibold text-app-text-secondary transition hover:border-app-accent/30 hover:bg-app-accent/10 hover:text-app-text"
+            onClick={onClear}
+          >
+            Clear
+          </button>
+        ) : null}
+      </div>
+      <div className="p-4">
+        {selection ? (
+          <div className="rounded-[24px] border border-app-accent/16 bg-black/20 p-4">
+            <div className="flex items-start gap-3">
+              {showAvatars ? (
+                selection.authorPhoto ? (
+                  <img
+                    src={proxyImageUrl(selection.authorPhoto)}
+                    alt=""
+                    className={`${densityStyles.avatar} border border-white/10 object-cover`}
+                  />
+                ) : (
+                  <div className={`grid place-items-center border border-white/10 bg-gradient-to-br from-app-accent/55 to-sky-500/30 font-semibold text-white ${densityStyles.fallbackAvatar}`}>
+                    {selection.author.charAt(0).toUpperCase()}
+                  </div>
+                )
+              ) : null}
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-start gap-2">
+                  <div className={`truncate font-semibold text-app-text ${densityStyles.author}`}>
+                    {selection.author}
+                  </div>
+                  <MessageBadges message={selection} enabled={showBadges} />
+                  {showTimestamps ? (
+                    <span className={`ml-auto rounded-full border border-white/8 bg-white/4 px-2 py-0.5 font-medium text-app-text-subtle ${densityStyles.timestamp}`}>
+                      {formatTimestamp(selection.publishedAt, timezone)}
+                    </span>
+                  ) : null}
+                </div>
+                <MessageContent
+                  message={selection}
+                  className={`${densityStyles.body} text-app-text-secondary`}
+                />
+                {selection.superChat?.amount ? (
+                  <div className="mt-3 inline-flex rounded-full border border-amber-300/20 bg-amber-300/12 px-3 py-1 text-xs font-semibold text-amber-100">
+                    {selection.superChat.amount}
+                  </div>
+                ) : null}
+                {selection.membershipGiftPurchase || selection.membershipLevel ? (
+                  <div className="mt-3 inline-flex rounded-full border border-emerald-300/18 bg-emerald-300/12 px-3 py-1 text-xs font-semibold text-emerald-100">
+                    {selection.membershipGiftPurchase
+                      ? `${selection.giftCount || 1} gift membership${selection.giftCount && selection.giftCount > 1 ? 's' : ''}`
+                      : selection.membershipLevel || 'Member highlight'}
+                  </div>
+                ) : null}
+                {selection.superChat?.stickerUrl ? (
+                  <div className="mt-3 rounded-[20px] border border-amber-300/10 bg-black/20 p-3">
+                    <img
+                      src={proxyImageUrl(selection.superChat.stickerUrl)}
+                      alt={selection.superChat.stickerAlt || 'Super sticker'}
+                      className="mx-auto max-h-28 w-auto"
+                    />
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <EmptyState
+            icon="📌"
+            title="Nothing pinned yet"
+            description="Select any message from the feed or event rail to preview what OBS will receive."
+            small
+          />
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -299,10 +702,18 @@ function EmptyState({
   small?: boolean;
 }) {
   return (
-    <div className={`empty-state ${small ? 'empty-state--sm' : ''}`}>
-      <div className="empty-state__icon">{icon}</div>
-      <h3 className="empty-state__title">{title}</h3>
-      <p className="empty-state__desc">{description}</p>
+    <div
+      className={`flex h-full flex-col items-center justify-center rounded-[28px] border border-dashed border-white/8 bg-white/[0.03] text-center ${
+        small ? 'min-h-[180px] px-5 py-8' : 'min-h-[360px] px-8 py-14'
+      }`}
+    >
+      <div className={`${small ? 'text-3xl' : 'text-5xl'}`}>{icon}</div>
+      <h3 className={`mt-4 font-semibold text-app-text ${small ? 'text-base' : 'text-xl'}`}>
+        {title}
+      </h3>
+      <p className={`mt-2 max-w-sm text-app-text-muted ${small ? 'text-sm' : 'text-base'}`}>
+        {description}
+      </p>
     </div>
   );
 }
@@ -310,7 +721,10 @@ function EmptyState({
 function Toast({ message, onClose }: { message: string | null; onClose: () => void }) {
   if (!message) return null;
   return (
-    <div className="toast" onClick={onClose}>
+    <div
+      className="fixed bottom-6 right-6 z-50 cursor-pointer rounded-2xl border border-app-accent/25 bg-app-accent/15 px-4 py-3 text-sm font-medium text-white shadow-panel-lg backdrop-blur"
+      onClick={onClose}
+    >
       {message}
     </div>
   );
@@ -321,14 +735,13 @@ function Toast({ message, onClose }: { message: string | null; onClose: () => vo
  */
 
 export default function DashboardPage() {
-  const router = useRouter();
-  const { messages } = useChatMessages();
-  const { selection } = useOverlaySelection();
-  const { connected, liveId, connect, disconnect, connecting } = useConnection();
+  const { backendAvailable, connected, liveId, connect, disconnect, connecting } = useConnection();
+  const { messages } = useChatMessages(backendAvailable);
+  const { selection } = useOverlaySelection(backendAvailable);
 
-  const [activeView, setActiveView] = useState<'chat' | 'settings'>('chat');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [streamInput, setStreamInput] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const [userFilter, setUserFilter] = useState<string | null>(null);
   const [autoScroll, setAutoScroll] = useState(true); // Auto-scroll enabled by default
   const [contextMenu, setContextMenu] = useState<{
@@ -341,112 +754,45 @@ export default function DashboardPage() {
   const prevMessageCountRef = useRef(0);
   const isAutoScrolling = useRef(false);
 
-  const [settings, setSettings] = useState({
-    autoSelectSuperChats: true,
-    autoSelectMembers: true,
-    overlayScale: 100,
-    overlayTheme: 'dark' as const,
-    serverPort: 4100,
-    overlayPosition: 'bottom-right' as const,
-    showTimestamps: true,
-    showAvatars: true,
-    messageFontSize: 16,
-    maxMessages: 50,
-    superChatPopup: true,
-    superChatDuration: 10,
-    customCss: '',
-    superChatCss: '',
-    membersCss: '',
-    messageMaxWidth: 400,
-    includeSuperChatsInOverlay: true,
-    includeMembersInOverlay: true,
-    membersDuration: 5,
-    overlayTxColor: '#ffffff',
-    overlayBgColor: 'rgba(20, 20, 22, 0.95)',
-    // Member Overrides
-    membersOverlayScale: 1,
-    membersFontSize: 14,
-    membersOverlayBgColor: '',
-    membersOverlayTxColor: '',
-    // Super Chat Overrides
-    superChatOverlayScale: 1,
-    superChatFontSize: 14,
-    superChatOverlayBgColor: '',
-    superChatOverlayTxColor: '',
-    membersOverlayPosition: 'bottom-right' as const,
-    superChatOverlayPosition: 'bottom-right' as const,
-    superChatHeaderColor: '#E62117',
-    membersGradientColor1: '#1a1a1e',
-    membersGradientColor2: '#1a1a1e',
-    useSpecialMemberStyling: true,
-  });
+  const [settings, setSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
+  const deferredSearchQuery = useDeferredValue(searchQuery);
 
   const hasInitializedRef = useRef(false);
   const prevSuperChatCountRef = useRef(0);
   const prevMemberCountRef = useRef(0);
 
-  // Persistence & Sync
   useEffect(() => {
-    // 1. Initial Load from localStorage
-    const saved = localStorage.getItem('better_yt_settings');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        setSettings(prev => ({ ...prev, ...parsed }));
-      } catch (e) {
-        console.error('Failed to load settings', e);
-      }
-    }
-
-    // 2. Listen for SSE settings updates (from other windows/processes)
-    if (!globalSSEConnection) {
-      // useChatMessages hook might have initialized it, but let's be safe
-      // In the current implementation, useOverlaySelection initializes it.
-    }
-
-    const onSettingsUpdate = (payload: any) => {
-      if (payload.settings) {
-        setSettings(prev => ({ ...prev, ...payload.settings }));
-      } else if (typeof payload === 'object' && !payload.message) {
-        // Some events might just be the settings object itself
-        setSettings(prev => ({ ...prev, ...payload }));
-      }
-    };
-
-    // The globalConnectionListeners handles 'selection' events.
-    // We need to either add 'settings' event listener to globalSSEConnection
-    // OR ensure the 'settings' data comes through a generic listener.
-    // Let's check how the settings are emitted from backend.
+    const initial = loadStoredSettings();
+    setSettings(initial);
 
     const settingsListener = (event: MessageEvent) => {
       try {
-        const data = JSON.parse(event.data);
-        setSettings(prev => ({ ...prev, ...data }));
-      } catch (e) { }
-    };
-
-    if (globalSSEConnection) {
-      globalSSEConnection.addEventListener('settings', settingsListener as EventListener);
-    }
-
-    return () => {
-      if (globalSSEConnection) {
-        globalSSEConnection.removeEventListener('settings', settingsListener as EventListener);
+        const incoming = JSON.parse(event.data);
+        setSettings((current) => {
+          const merged = normalizeSettings({ ...current, ...incoming });
+          return settingsAreEqual(current, merged) ? current : merged;
+        });
+      } catch (error) {
+        console.error('Failed to parse settings event', error);
       }
     };
-  }, []);
 
-  // Save on changes (Debounced or conditional to prevent overwrite)
-  // Actually, we skip saving here if we want /settings to be the source of truth,
-  // but Dashboard also has some settings like auto-scroll (not yet in global settings).
-  // For now, let's keep it but ensure it doesn't run before the first load.
-  const isLoadedRef = useRef(false);
+    const unsubscribe = subscribeToSettingsChanges((incoming) => {
+      setSettings((current) =>
+        settingsAreEqual(current, incoming) ? current : incoming,
+      );
+    });
+
+    globalSSEConnection?.addEventListener('settings', settingsListener as EventListener);
+
+    return () => {
+      unsubscribe();
+      globalSSEConnection?.removeEventListener('settings', settingsListener as EventListener);
+    };
+  }, [backendAvailable]);
+
   useEffect(() => {
-    if (!isLoadedRef.current) {
-      isLoadedRef.current = true;
-      return;
-    }
-    localStorage.setItem('better_yt_settings', JSON.stringify(settings));
+    applyAppTheme(settings);
   }, [settings]);
 
   const handleConnect = () => {
@@ -498,12 +844,42 @@ export default function DashboardPage() {
   const superChats = useMemo(() => messages.filter(m => m.superChat), [messages]);
   const newMembers = useMemo(() => messages.filter(m => m.membershipGift || m.membershipGiftPurchase), [messages]);
   const regularMessages = useMemo(() => messages.filter(m => !m.superChat && !m.membershipGift && !m.membershipGiftPurchase), [messages]);
+  const densityStyles = useMemo(
+    () => getDensityStyles(settings.dashboardDensity),
+    [settings.dashboardDensity],
+  );
 
-  // Apply user filter
+  // Apply user and query filter
   const filteredMessages = useMemo(() => {
-    if (!userFilter) return regularMessages;
-    return regularMessages.filter(m => m.author === userFilter);
-  }, [regularMessages, userFilter]);
+    const query = deferredSearchQuery.trim().toLowerCase();
+
+    return regularMessages.filter((message) => {
+      if (userFilter && message.author !== userFilter) {
+        return false;
+      }
+
+      if (!query) {
+        return true;
+      }
+
+      return getMessageSearchValue(message).includes(query);
+    });
+  }, [deferredSearchQuery, regularMessages, userFilter]);
+
+  const uniqueAuthors = useMemo(
+    () => new Set(regularMessages.map((message) => message.author)).size,
+    [regularMessages],
+  );
+
+  const railSpecialCount = superChats.length + newMembers.length;
+
+  const dashboardShellStyle = useMemo(
+    () =>
+      ({
+        '--dashboard-rail-width': `${settings.dashboardPanelWidth}px`,
+      }) as CSSProperties,
+    [settings.dashboardPanelWidth],
+  );
 
   // Auto-selection
   useEffect(() => {
@@ -584,11 +960,7 @@ export default function DashboardPage() {
     }
   }, []);
 
-  const handleSettingsUpdate = useCallback((newSettings: typeof settings) => {
-    setSettings(newSettings);
-  }, []);
-
-  const handleContextMenu = useCallback((e: React.MouseEvent, message: ChatMessage) => {
+  const handleContextMenu = useCallback((e: MouseEvent, message: ChatMessage) => {
     e.preventDefault();
     setContextMenu({ x: e.clientX, y: e.clientY, message });
   }, []);
@@ -606,12 +978,8 @@ export default function DashboardPage() {
     }
   }, [contextMenu, closeContextMenu]);
 
-  const overlayUrl = `http://localhost:3000/overlay`;
-
   return (
-    <div className="app-container">
-      {/* TOP BAR */}
-      {/* TOP BAR */}
+    <div className="app-container bg-app-bg">
       <TopBar
         connected={connected}
         connecting={connecting}
@@ -627,131 +995,293 @@ export default function DashboardPage() {
         }}
       />
 
-      {/* MAIN LAYOUT */}
-      {/* MAIN LAYOUT */}
-      <>
-        <div className="main-layout">
-          <div className="main-content">
-            {/* CHAT PANEL */}
-            <div className="chat-panel">
-              <div className="panel-header">
-                <h2 className="panel-header__title">Chat Stream</h2>
-                <span className="panel-header__count">{filteredMessages.length}</span>
-                {userFilter && (
-                  <span className="user-filter-badge">
-                    <span>@{userFilter}</span>
-                    <button onClick={() => setUserFilter(null)} title="Clear filter">✕</button>
-                  </span>
-                )}
-                <div className="panel-header__spacer" />
-                {selection && (
-                  <button className="panel-header__btn" onClick={handleClearSelection}>
-                    Clear Selection
-                  </button>
-                )}
-              </div>
-
-              {filteredMessages.length === 0 ? (
-                <EmptyState
-                  icon="💬"
-                  title={userFilter ? `No messages from @${userFilter}` : "No messages yet"}
-                  description={userFilter
-                    ? "This user hasn't sent any messages yet. Click their name again or clear the filter."
+      <div
+        className="relative flex-1 overflow-auto"
+        style={{
+          background: settings.showAmbientGlow
+            ? 'radial-gradient(circle at top left, var(--accent-glow), transparent 26%), radial-gradient(circle at bottom right, rgba(56,189,248,0.12), transparent 28%), var(--bg)'
+            : 'var(--bg)',
+        }}
+      >
+        <div className="px-4 py-4 xl:px-6">
+          <div
+            className={`mx-auto flex min-h-full w-full flex-col gap-4 ${
+              settings.workspaceFrame === 'framed' ? 'max-w-[1600px]' : 'max-w-none'
+            }`}
+          >
+            <section className="grid gap-3 xl:grid-cols-3">
+              <MetricCard
+                label="Visible Feed"
+                value={String(filteredMessages.length)}
+                hint={
+                  userFilter
+                    ? `Filtered to @${userFilter}`
+                    : deferredSearchQuery
+                      ? `Search: ${deferredSearchQuery}`
+                      : 'Operator moderation queue'
+                }
+                toneClass="text-sky-200"
+              />
+              <MetricCard
+                label="Active Authors"
+                value={String(uniqueAuthors)}
+                hint={
+                  regularMessages.length > 0
+                    ? 'Unique chatters in the current buffer'
                     : connected
-                      ? "Waiting for chat messages from the live stream..."
-                      : "Enter a YouTube Live URL or Video ID above to connect."}
-                />
-              ) : (
-                <div className="chat-list-container">
-                  <div
-                    className="chat-list"
-                    ref={chatListRef}
-                    onScroll={handleScroll}
-                  >
-                    {filteredMessages.map(msg => (
-                      <MessageRow
-                        key={msg.id}
-                        message={msg}
-                        isSelected={selection?.id === msg.id}
-                        onSelect={() => handleSelect(msg)}
-                        onCopy={handleCopy}
-                        onFilterUser={setUserFilter}
-                        onContextMenu={(e) => handleContextMenu(e, msg)}
-                      />
-                    ))}
+                      ? 'Unique chatters in current session'
+                      : 'Connect to a live stream to populate'
+                }
+                toneClass="text-emerald-200"
+              />
+              <MetricCard
+                label="Overlay Output"
+                value={selection ? getMessageKind(selection) : 'Idle'}
+                hint={
+                  selection
+                    ? `Pinned from @${selection.author}`
+                    : railSpecialCount > 0
+                      ? `${railSpecialCount} highlight items waiting in rail`
+                      : 'Nothing pinned yet'
+                }
+                toneClass="text-amber-200"
+              />
+            </section>
+
+            <div
+              className="grid min-h-0 gap-4 lg:grid-cols-[minmax(0,1fr)_var(--dashboard-rail-width)]"
+              style={dashboardShellStyle}
+            >
+              <section className="flex min-h-[720px] flex-col overflow-hidden rounded-[30px] border border-white/8 bg-[linear-gradient(180deg,rgba(18,19,26,0.92),rgba(11,12,18,0.98))] shadow-[0_28px_70px_rgba(0,0,0,0.42)] backdrop-blur">
+                <div className="border-b border-white/6 px-5 py-5">
+                  <div className="flex flex-wrap items-start gap-3">
+                    <div>
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-app-text-subtle">
+                        Live Feed
+                      </div>
+                      <h2 className="mt-2 text-[28px] font-semibold tracking-[-0.04em] text-app-text">
+                        Broadcast Command Deck
+                      </h2>
+                      <p className="mt-1 text-sm text-app-text-muted">
+                        Search, inspect, and route messages to the overlay without leaving the desk.
+                      </p>
+                    </div>
+                    <div className="flex-1" />
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full border border-white/8 bg-white/5 px-3 py-1 text-xs font-semibold text-app-text-secondary">
+                        {autoScroll ? 'Live follow on' : 'Manual review'}
+                      </span>
+                      <span className="rounded-full border border-white/8 bg-white/5 px-3 py-1 text-xs font-semibold text-app-text-secondary">
+                        Density: {settings.dashboardDensity}
+                      </span>
+                      {selection ? (
+                        <span className="rounded-full border border-app-accent/20 bg-app-accent/10 px-3 py-1 text-xs font-semibold text-app-accent">
+                          Pinned: {getMessageKind(selection)}
+                        </span>
+                      ) : null}
+                      {selection && !settings.showSelectionPreview ? (
+                        <button
+                          type="button"
+                          className="rounded-full border border-white/8 bg-white/5 px-3 py-1 text-xs font-semibold text-app-text-secondary transition hover:border-app-accent/30 hover:bg-app-accent/10 hover:text-app-text"
+                          onClick={handleClearSelection}
+                        >
+                          Clear selection
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
-                  {!autoScroll && (
-                    <button className="sync-button" onClick={scrollToBottom}>
-                      ↓ Scroll to Bottom
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
 
-            {/* EVENTS PANEL */}
-            <div className="events-panel">
-              {/* Super Chats Section */}
-              <div className="event-section">
-                <div className="section-header">
-                  <span className="section-header__title">Super Chats</span>
-                  {superChats.length > 0 && (
-                    <span className="section-header__badge">{superChats.length}</span>
-                  )}
-                </div>
-                <div className="section-content">
-                  {superChats.length === 0 ? (
-                    <EmptyState
-                      icon="💎"
-                      title="No super chats yet"
-                      description="When someone sends a super chat, it will appear here."
-                      small
-                    />
-                  ) : (
-                    superChats.map(msg => (
-                      <SuperChatItem
-                        key={msg.id}
-                        message={msg}
-                        isSelected={selection?.id === msg.id}
-                        onSelect={() => handleSelect(msg)}
+                  <div className="mt-5 flex flex-col gap-3 xl:flex-row xl:items-center">
+                    <label className="relative flex-1">
+                      <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-sm text-app-text-subtle">
+                        ⌕
+                      </span>
+                      <input
+                        type="search"
+                        value={searchQuery}
+                        onChange={(event) => setSearchQuery(event.target.value)}
+                        placeholder="Search author, text, or emoji alt text"
+                        className="h-12 w-full rounded-2xl border border-white/8 bg-black/20 pl-11 pr-4 text-sm text-app-text outline-none transition focus:border-app-accent/40 focus:bg-black/30 focus:ring-2 focus:ring-app-accent/15"
                       />
-                    ))
-                  )}
-                </div>
-              </div>
+                    </label>
 
-              {/* New Members Section */}
-              <div className="event-section">
-                <div className="section-header">
-                  <span className="section-header__title">New Members</span>
-                  {newMembers.length > 0 && (
-                    <span className="section-header__badge">{newMembers.length}</span>
-                  )}
+                    <div className="flex flex-wrap items-center gap-2">
+                      {userFilter ? (
+                        <span className="inline-flex items-center gap-2 rounded-full border border-app-accent/20 bg-app-accent/10 px-3 py-2 text-xs font-semibold text-app-accent">
+                          <span>@{userFilter}</span>
+                          <button
+                            type="button"
+                            className="grid h-5 w-5 place-items-center rounded-full bg-white/10 text-[10px] text-white transition hover:bg-white/20"
+                            onClick={() => setUserFilter(null)}
+                            title="Clear author filter"
+                          >
+                            ✕
+                          </button>
+                        </span>
+                      ) : null}
+                      {deferredSearchQuery ? (
+                        <button
+                          type="button"
+                          className="rounded-full border border-white/8 bg-white/5 px-3 py-2 text-xs font-semibold text-app-text-secondary transition hover:border-white/12 hover:bg-white/8"
+                          onClick={() => setSearchQuery('')}
+                        >
+                          Clear search
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
                 </div>
-                <div className="section-content">
-                  {newMembers.length === 0 ? (
-                    <EmptyState
-                      icon="⭐"
-                      title="No new members yet"
-                      description="New channel members will appear here when they join."
-                      small
-                    />
-                  ) : (
-                    newMembers.map(msg => (
-                      <MemberItem
-                        key={msg.id}
-                        message={msg}
-                        isSelected={selection?.id === msg.id}
-                        onSelect={() => handleSelect(msg)}
-                      />
-                    ))
-                  )}
+
+                {filteredMessages.length === 0 ? (
+                  <EmptyState
+                    icon="💬"
+                    title={
+                      deferredSearchQuery
+                        ? `No results for "${deferredSearchQuery}"`
+                        : userFilter
+                          ? `No messages from @${userFilter}`
+                          : 'No messages yet'
+                    }
+                    description={
+                      deferredSearchQuery
+                        ? 'Try a different keyword or clear the search to restore the live feed.'
+                        : userFilter
+                          ? "This user hasn't sent anything in the current buffer. Clear the filter to return to the full queue."
+                          : !backendAvailable
+                            ? 'Backend is offline. Start the backend on port 4100, then reconnect.'
+                            : connected
+                              ? 'Waiting for chat messages from the live stream...'
+                              : 'Enter a YouTube Live URL or Video ID above to connect.'
+                    }
+                  />
+                ) : (
+                  <div className="relative flex min-h-0 flex-1 flex-col">
+                    <div
+                      className="flex-1 space-y-3 overflow-y-auto px-5 py-4"
+                      ref={chatListRef}
+                      onScroll={handleScroll}
+                    >
+                      {filteredMessages.map((msg) => (
+                        <MessageRow
+                          key={msg.id}
+                          message={msg}
+                          isSelected={selection?.id === msg.id}
+                          onSelect={() => handleSelect(msg)}
+                          onCopy={handleCopy}
+                          onFilterUser={setUserFilter}
+                          onContextMenu={(event) => handleContextMenu(event, msg)}
+                          densityStyles={densityStyles}
+                          showBadges={settings.showBadges}
+                          showAvatars={settings.showAvatars}
+                          showTimestamps={settings.showTimestamps}
+                        />
+                      ))}
+                    </div>
+                    {!autoScroll && (
+                      <button
+                        className="absolute bottom-5 left-1/2 inline-flex -translate-x-1/2 items-center gap-2 rounded-full bg-app-accent px-4 py-2 text-xs font-semibold text-white shadow-panel transition hover:bg-app-accent-hover"
+                        onClick={scrollToBottom}
+                      >
+                        <span>↓</span>
+                        <span>Jump to live edge</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+              </section>
+
+              <aside className="flex min-h-0 flex-col gap-4">
+                {settings.showSelectionPreview ? (
+                  <SelectionPreviewCard
+                    selection={selection}
+                    densityStyles={densityStyles}
+                    showAvatars={settings.showAvatars}
+                    showBadges={settings.showBadges}
+                    showTimestamps={settings.showTimestamps}
+                    onClear={handleClearSelection}
+                  />
+                ) : null}
+
+                <div className="grid min-h-0 flex-1 gap-4 md:grid-cols-2 lg:grid-cols-1">
+                  <section className="flex min-h-0 flex-col overflow-hidden rounded-[28px] border border-white/8 bg-[linear-gradient(180deg,rgba(27,21,11,0.9),rgba(19,14,8,0.97))] shadow-panel-lg backdrop-blur">
+                    <div className="flex items-center gap-3 border-b border-white/6 px-5 py-4">
+                      <div>
+                        <span className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-100/80">
+                          Revenue
+                        </span>
+                        <h3 className="mt-1 text-base font-semibold text-app-text">Super Chats</h3>
+                      </div>
+                      <div className="flex-1" />
+                      <span className="rounded-full border border-amber-300/20 bg-amber-300/10 px-3 py-1 text-xs font-semibold text-amber-100">
+                        {superChats.length}
+                      </span>
+                    </div>
+                    <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
+                      {superChats.length === 0 ? (
+                        <EmptyState
+                          icon="💎"
+                          title="No super chats yet"
+                          description="When someone sends a super chat, it will appear here."
+                          small
+                        />
+                      ) : (
+                        superChats.map((msg) => (
+                          <SuperChatItem
+                            key={msg.id}
+                            message={msg}
+                            isSelected={selection?.id === msg.id}
+                            onSelect={() => handleSelect(msg)}
+                            densityStyles={densityStyles}
+                            showAvatars={settings.showAvatars}
+                            showTimestamps={settings.showTimestamps}
+                          />
+                        ))
+                      )}
+                    </div>
+                  </section>
+
+                  <section className="flex min-h-0 flex-col overflow-hidden rounded-[28px] border border-white/8 bg-[linear-gradient(180deg,rgba(10,28,22,0.92),rgba(8,17,13,0.98))] shadow-panel-lg backdrop-blur">
+                    <div className="flex items-center gap-3 border-b border-white/6 px-5 py-4">
+                      <div>
+                        <span className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-100/80">
+                          Community
+                        </span>
+                        <h3 className="mt-1 text-base font-semibold text-app-text">New Members</h3>
+                      </div>
+                      <div className="flex-1" />
+                      <span className="rounded-full border border-emerald-300/20 bg-emerald-300/10 px-3 py-1 text-xs font-semibold text-emerald-100">
+                        {newMembers.length}
+                      </span>
+                    </div>
+                    <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
+                      {newMembers.length === 0 ? (
+                        <EmptyState
+                          icon="⭐"
+                          title="No new members yet"
+                          description="New channel members will appear here when they join."
+                          small
+                        />
+                      ) : (
+                        newMembers.map((msg) => (
+                          <MemberItem
+                            key={msg.id}
+                            message={msg}
+                            isSelected={selection?.id === msg.id}
+                            onSelect={() => handleSelect(msg)}
+                            densityStyles={densityStyles}
+                            showAvatars={settings.showAvatars}
+                            showTimestamps={settings.showTimestamps}
+                          />
+                        ))
+                      )}
+                    </div>
+                  </section>
                 </div>
-              </div>
+              </aside>
             </div>
           </div>
         </div>
-      </>
+      </div>
 
       {/* CONTEXT MENU */}
       {contextMenu && (

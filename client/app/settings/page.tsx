@@ -1,96 +1,93 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import SettingsView from '../components/SettingsView';
+import { useEffect, useState } from 'react';
+import type { AppSettings } from '@shared/settings';
+import { DEFAULT_APP_SETTINGS } from '@shared/settings';
+import SettingsView, { type SettingsSaveState } from '../components/SettingsView';
 import TopBar from '../components/TopBar';
+import {
+  loadStoredSettings,
+  normalizeSettings,
+  persistSettings,
+  settingsAreEqual,
+  subscribeToSettingsChanges,
+} from '../../lib/appSettings';
+import { applyAppTheme } from '../../lib/appTheme';
+import { BACKEND_URL, getOverlayUrls } from '../../lib/runtime';
 
-// Default settings fallback
-const defaultSettings = {
-    autoSelectSuperChats: true,
-    autoSelectMembers: true,
-    overlayScale: 100,
-    overlayTheme: 'dark' as const,
-    serverPort: 4100,
-    overlayPosition: 'bottom-right' as const,
-    showTimestamps: true,
-    showAvatars: true,
-    messageFontSize: 16,
-    maxMessages: 50,
-    superChatPopup: true,
-    superChatDuration: 10,
-    customCss: '',
-    superChatCss: '',
-    membersCss: '',
-    messageMaxWidth: 400,
-    includeSuperChatsInOverlay: true,
-    includeMembersInOverlay: true,
-    membersDuration: 5,
-    overlayTxColor: '#ffffff',
-    overlayBgColor: 'rgba(20, 20, 22, 0.95)',
-    // Member Overrides
-    membersOverlayScale: 1,
-    membersFontSize: 14,
-    membersOverlayBgColor: '',
-    membersOverlayTxColor: '',
-    // Super Chat Overrides
-    superChatOverlayScale: 1,
-    superChatFontSize: 14,
-    superChatOverlayBgColor: '',
-    superChatOverlayTxColor: '',
-    membersOverlayPosition: 'bottom-right' as const,
-    superChatOverlayPosition: 'bottom-right' as const,
-    superChatHeaderColor: '#E62117',
-    membersGradientColor1: '#1a1a1e',
-    membersGradientColor2: '#1a1a1e',
-    useSpecialMemberStyling: true,
-};
+const SYNC_DEBOUNCE_MS = 220;
 
 export default function SettingsPage() {
-    const router = useRouter();
-    const [settings, setSettings] = useState(defaultSettings);
-    const [loaded, setLoaded] = useState(false);
+  const [settings, setSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
+  const [loaded, setLoaded] = useState(false);
+  const [saveState, setSaveState] = useState<SettingsSaveState>('idle');
 
-    useEffect(() => {
-        // Load settings from localStorage
-        const saved = localStorage.getItem('better_yt_settings');
-        if (saved) {
-            try {
-                const parsed = JSON.parse(saved);
-                setSettings({ ...defaultSettings, ...parsed });
-            } catch (e) {
-                console.error('Failed to parse settings', e);
-            }
-        }
-        setLoaded(true);
-    }, []);
+  useEffect(() => {
+    const initialSettings = loadStoredSettings();
+    setSettings(initialSettings);
+    setLoaded(true);
 
-    const handleUpdate = (newSettings: any) => {
-        setSettings(newSettings);
-        localStorage.setItem('better_yt_settings', JSON.stringify(newSettings));
+    return subscribeToSettingsChanges((incoming) => {
+      setSettings((current) =>
+        settingsAreEqual(current, incoming) ? current : incoming,
+      );
+    });
+  }, []);
 
-        // Sync with backend for overlay (cross-process sync)
-        fetch('http://localhost:4100/settings/update', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(newSettings)
-        }).catch(err => console.error('Failed to sync settings', err));
-    };
+  useEffect(() => {
+    if (!loaded) {
+      return;
+    }
 
-    if (!loaded) return <div style={{ background: 'var(--bg-1)', height: '100vh', width: '100vw' }} />;
+    applyAppTheme(settings);
 
-    return (
-        <div style={{ height: '100vh', width: '100vw', background: 'var(--bg-1)', display: 'flex', flexDirection: 'column' }}>
-            <TopBar isSettings />
-
-            <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
-                <SettingsView
-                    settings={settings}
-                    onUpdate={handleUpdate}
-                    overlayUrl="http://localhost:3000/overlay"
-                    onClose={undefined}
-                />
-            </div>
-        </div>
+    const normalized = persistSettings(settings);
+    setSettings((current) =>
+      settingsAreEqual(current, normalized) ? current : normalized,
     );
+    setSaveState('saved-local');
+
+    const timeout = window.setTimeout(async () => {
+      try {
+        const response = await fetch(`${BACKEND_URL}/settings/update`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(normalized),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Settings sync failed: ${response.status}`);
+        }
+
+        setSaveState('synced');
+      } catch (error) {
+        console.error('Failed to sync settings', error);
+        setSaveState('sync-error');
+      }
+    }, SYNC_DEBOUNCE_MS);
+
+    return () => window.clearTimeout(timeout);
+  }, [loaded, settings]);
+
+  const handleUpdate = (nextSettings: AppSettings) => {
+    setSettings(normalizeSettings(nextSettings));
+  };
+
+  if (!loaded) {
+    return <div className="h-screen w-screen bg-app-bg" />;
+  }
+
+  return (
+    <div className="flex h-screen w-screen flex-col bg-app-bg">
+      <TopBar isSettings />
+      <div className="flex-1 overflow-hidden">
+        <SettingsView
+          settings={settings}
+          onUpdate={handleUpdate}
+          overlayUrls={getOverlayUrls()}
+          saveState={saveState}
+        />
+      </div>
+    </div>
+  );
 }

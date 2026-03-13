@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import EventEmitter from 'eventemitter3';
 import type { ChatMessage, Poll } from '@shared/chat';
+import type { AppSettings } from '@shared/settings';
 import { bootstrapInnertube, type IngestionContext } from './ingestion/youtubei';
 import { seedMockMessages, trimMessages } from './mockData.js';
 import crypto from 'crypto';
@@ -34,8 +35,8 @@ export async function startBackend() {
   let currentPoll: Poll | null = null;
   const overlayEmitter = new EventEmitter<{ update: (message: ChatMessage | null) => void }>();
   const pollEmitter = new EventEmitter<{ update: (poll: Poll | null) => void }>();
-  const settingsEmitter = new EventEmitter<{ update: (settings: any) => void }>();
-  let currentSettings: any = null;
+  const settingsEmitter = new EventEmitter<{ update: (settings: AppSettings) => void }>();
+  let currentSettings: AppSettings | null = null;
 
   const rawLiveId = process.env.YOUTUBE_LIVE_ID ?? '';
   const parsedLiveId = extractLiveId(rawLiveId);
@@ -230,7 +231,7 @@ export async function startBackend() {
     });
   });
 
-  fastify.post('/settings/update', async (request, reply) => {
+  fastify.post<{ Body: AppSettings }>('/settings/update', async (request, reply) => {
     const settings = request.body;
     currentSettings = settings;
     settingsEmitter.emit('update', settings);
@@ -254,7 +255,7 @@ export async function startBackend() {
       res.write(`event: selection\ndata: ${JSON.stringify({ message })}\n\n`);
     };
 
-    const sendSettings = (settings: any) => {
+    const sendSettings = (settings: AppSettings) => {
       res.write(`event: settings\ndata: ${JSON.stringify(settings)}\n\n`);
     };
 
@@ -409,3 +410,8 @@ function extractLiveId(input: string): string {
 
   return '';
 }
+
+void startBackend().catch((error) => {
+  console.error('[Backend] Failed to start server:', error);
+  process.exit(1);
+});

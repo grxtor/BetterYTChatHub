@@ -69,9 +69,9 @@ export default function Sidebar({ activeView, onViewChange, connectionInfo, stat
 
 function StatBox({ label, value, color }: { label: string, value: number, color?: string }) {
     return (
-        <div style={{ background: 'var(--bg-2)', padding: '10px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
+        <div style={{ background: 'var(--surface-2)', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)' }}>
             <div style={{ fontSize: '10px', fontWeight: '700', color: 'var(--text-muted)', marginBottom: '4px' }}>{label}</div>
-            <div style={{ fontSize: '16px', fontWeight: '700', color: color || 'var(--text-primary)' }}>{value}</div>
+            <div style={{ fontSize: '16px', fontWeight: '700', color: color || 'var(--text)' }}>{value}</div>
         </div>
     );
 }

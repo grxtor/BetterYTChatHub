@@ -3,6 +3,9 @@
 ## Current Focus
 - **Live YouTube integration active**: Backend connects to real YouTube Live chat via Innertube
 - **Dark minimalist UI redesign**: Clean dashboard with dark theme (#0a0a0a background), tab-based navigation, grid layout, and minimal spacing
+- **Broadcast console redesign**: Dashboard feed, super chat rail, and members rail are being repositioned around a denser operator-facing control-room layout.
+- **Desktop workspace shell**: The UI is shifting toward an Electron-style multi-panel shell with a framed/full-width workspace mode, configurable rail width, density presets, and accent-driven theming.
+- **Live settings persistence**: Settings UI now aims to auto-save instantly, keep overlays in sync across tabs/pages, and avoid stale local-only state.
 - **Connection flow**: Shows connection prompt on startup, disappears after connecting to YouTube Live stream
 - **Rich message parsing**: Full support for superchats, memberships, badges (moderator, member, verified)
 - **Timezone-aware timestamps**: All message timestamps display in user's local timezone with proper browser detection
@@ -10,6 +13,19 @@
 - **Image proxy implemented**: Backend proxies all YouTube CDN images with caching to prevent 429 rate limit errors
 
 ## Recent Decisions
+- Introduced a shared `AppSettings` model in `shared/settings.ts` and moved all settings consumers to the same defaults + normalization pipeline.
+- Added a client-side settings sync layer backed by `localStorage`, `BroadcastChannel`, and a custom browser event so settings apply live across dashboard/settings/overlay routes.
+- Migrated the settings page to live auto-save with explicit state badges (`Saved locally`, `Synced`, `Sync failed`) and replaced non-accessible toggle `div`s with real switch controls.
+- Added Tailwind CSS v4 to the client while keeping existing design tokens in `globals.css`, enabling a hybrid utility + token-driven UI system.
+- Fixed a Tailwind cascade regression by moving legacy global styles into explicit CSS layers and defining a fixed Tailwind spacing token. Without this, unlayered reset/component rules were silently overriding `px-*`, `py-*`, and `mx-auto` utilities in the dashboard/settings layouts.
+- Rebuilt the settings preview color controls so stored `rgba(...)` values remain supported without feeding invalid values into `input[type=color]`.
+- Added a dedicated Workspace tab in settings with app-shell controls for workspace frame, density, rail width, accent color, ambient glow, badge visibility, and selection preview behavior.
+- Rebuilt the dashboard into a command-deck layout with summary cards, live feed search, pinned selection preview, and a settings-driven right rail that better matches an Electron/multi-platform control room.
+- Added responsive settings layout behavior so sidebar/content/preview collapse gracefully on narrower screens instead of assuming a fixed 3-column desktop-only layout.
+- Reworked dashboard message/event cards so avatar/timestamp visibility settings now apply consistently to normal chat rows, super chats, and member panels.
+- Rewrote the README to match the actual current codebase: Next.js 15 + Fastify web app, shared settings system, command-deck dashboard, overlay routes, and real troubleshooting steps for port conflicts / `.next` corruption. Removed inaccurate claims about a committed Electron wrapper.
+- Fixed backend startup regression by invoking `startBackend()` from `backend/src/index.ts`; previously the dev command exited immediately without binding port 4100, causing frontend `ERR_CONNECTION_REFUSED` errors for `/chat/*`, `/overlay/*`, and `/health`.
+- Hardened dashboard connection flow so the UI treats the backend being offline as a normal state: `/health` failures now set `backendAvailable=false`, message polling and SSE subscription are paused until the backend is reachable again, and the empty state explains that the backend must be started on port 4100.
 - Fixed CORS issues by setting headers on raw response object after `reply.hijack()` for SSE endpoint
 - Added `.env` loading via `tsx --env-file=.env` for YouTube Live ID configuration
 - Enhanced `ChatMessage` type to include badges, author photos, superchat info, and membership status
@@ -35,12 +51,14 @@
 - **Live Poll Indicator**: Added simple poll detection that shows a pulsing "📊 Active Poll" indicator in the dashboard header when a YouTube poll is active. Backend listens for `UpdateLiveChatPollAction` and `CloseLiveChatActionPanelAction`/`RemoveBannerForLiveChatCommand` events. Indicator automatically appears/disappears based on poll state. Note: YouTube's API does not provide live vote percentages, so the feature only indicates poll presence without showing results.
 
 ## Immediate Next Steps
-1. Implement user authentication via YouTube OAuth 2.0 (Task 5)
-2. Add persistent image cache with SQLite (Task 6)
-3. Develop overlay theme controls (Task 7)
-4. Add error recovery and reconnection logic for stream interruptions
+1. Regression-test the expanded workspace settings flow against real YouTube traffic, not only mock mode
+2. Decide whether to add preset/export-import support for workspace themes now that app-level customization exists
+3. Implement user authentication via YouTube OAuth 2.0 (Task 5)
+4. Add persistent image cache with SQLite (Task 6)
+5. Add error recovery and reconnection logic for stream interruptions
 
 ## Open Questions
 - Whether to add message search/filtering UI controls
+- Whether workspace themes should support named presets or JSON import/export
 - Whether to persist Innertube visitor data between runs
 - Should image cache be persistent across restarts?

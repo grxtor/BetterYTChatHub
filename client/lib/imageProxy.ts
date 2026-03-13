@@ -1,4 +1,4 @@
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://localhost:4100';
+import { BACKEND_URL } from './runtime';
 
 /**
  * Converts a YouTube CDN image URL to use our backend proxy
@@ -24,4 +24,3 @@ export function proxyImageUrl(url: string | undefined): string | undefined {
   // Return non-YouTube URLs as-is
   return url;
 }
-

@@ -2,9 +2,17 @@
 
 import { useEffect, useState, useRef } from 'react';
 import type { ChatMessage } from '@shared/chat';
+import { DEFAULT_APP_SETTINGS, type AppSettings } from '@shared/settings';
 import { proxyImageUrl } from '../../lib/imageProxy';
-
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://localhost:4100';
+import {
+  loadStoredSettings,
+  normalizeSettings,
+  persistSettings,
+  settingsAreEqual,
+  subscribeToSettingsChanges,
+} from '../../lib/appSettings';
+import { applyAppTheme } from '../../lib/appTheme';
+import { BACKEND_URL } from '../../lib/runtime';
 
 type SelectionPayload = {
   message: (ChatMessage & { timestamp?: string | number | Date }) | null;
@@ -20,34 +28,7 @@ export default function OverlayPage() {
   const switchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Expanded Settings State
-  const [settings, setSettings] = useState<any>({
-    overlayScale: 1,
-    overlayPosition: 'bottom-left',
-    overlayTheme: 'dark',
-    messageFontSize: 14,
-    showAvatars: true,
-    showTimestamps: true,
-    messageMaxWidth: 400,
-    includeSuperChatsInOverlay: true,
-    includeMembersInOverlay: true,
-    membersDuration: 5,
-    overlayTxColor: '#ffffff',
-    overlayBgColor: 'rgba(20, 20, 22, 0.95)',
-    customCss: '',
-    // Member Overrides
-    membersOverlayScale: 1,
-    membersFontSize: 14,
-    membersOverlayBgColor: '',
-    membersOverlayTxColor: '',
-    membersCss: '',
-    // Super Chat Overrides
-    superChatOverlayScale: 1,
-    superChatFontSize: 14,
-    superChatOverlayBgColor: '',
-    superChatOverlayTxColor: '',
-    superChatCss: '',
-    superChatDuration: 10
-  });
+  const [settings, setSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
 
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
@@ -95,14 +76,10 @@ export default function OverlayPage() {
     const onSettingsUpdate = (event: MessageEvent) => {
       try {
         const newSettings = JSON.parse(event.data);
-        console.log('[Overlay] Received settings update:', newSettings);
-        setSettings((prev: any) => {
-          const merged = { ...prev, ...newSettings };
-          // Persist to localStorage for this browser context (e.g. OBS)
-          localStorage.setItem('better_yt_settings', JSON.stringify(merged));
-          return merged;
-        });
-        settingsRef.current = { ...settingsRef.current, ...newSettings };
+        const merged = normalizeSettings({ ...settingsRef.current, ...newSettings });
+        persistSettings(merged);
+        settingsRef.current = merged;
+        setSettings((current) => (settingsAreEqual(current, merged) ? current : merged));
       } catch (err) {
         console.error('Failed to parse settings event', err);
       }
@@ -159,34 +136,19 @@ export default function OverlayPage() {
   }, [message, displayMessage]);
 
   useEffect(() => {
-    const saved = localStorage.getItem('better_yt_settings');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        setSettings((prev: any) => ({
-          ...prev,
-          ...parsed
-        }));
-      } catch (e) {
-      }
-    }
+    const initial = loadStoredSettings();
+    settingsRef.current = initial;
+    setSettings(initial);
 
-    // Listen for changes from other tabs (Settings page)
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === 'better_yt_settings' && e.newValue) {
-        try {
-          const parsed = JSON.parse(e.newValue);
-          setSettings((prev: any) => ({ ...prev, ...parsed }));
-          settingsRef.current = { ...settingsRef.current, ...parsed };
-        } catch (error) {
-          console.error('Failed to parse settings update', error);
-        }
-      }
-    };
-
-    window.addEventListener('storage', handleStorageChange);
-    return () => window.removeEventListener('storage', handleStorageChange);
+    return subscribeToSettingsChanges((incoming) => {
+      settingsRef.current = incoming;
+      setSettings((current) => (settingsAreEqual(current, incoming) ? current : incoming));
+    });
   }, []);
+
+  useEffect(() => {
+    applyAppTheme(settings);
+  }, [settings]);
 
   // Helper to determine message type
   const isMemberEvent = displayMessage && (

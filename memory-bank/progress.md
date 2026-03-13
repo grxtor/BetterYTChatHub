@@ -44,9 +44,22 @@
 - [ ] Write tests (unit/integration) and contributor documentation.
 
 ## Phase 5 - Customization
-- [ ] Add customization options
+- [x] Add baseline workspace customization options
+- [ ] Expand customization presets/import-export and deeper theme tooling
 
 ## Current Status
+- **✅ Shared Settings Model Added**: `AppSettings` and `DEFAULT_APP_SETTINGS` now live in `shared/settings.ts`, replacing page-specific defaults and eliminating scale/default drift between dashboard, settings, overlay, superchat, and members routes.
+- **✅ Live Settings Sync Added**: Settings changes now normalize legacy values, persist locally, broadcast across tabs/pages, and best-effort sync to the backend while exposing save-state feedback in the UI.
+- **✅ Settings UI Redesigned**: The settings screen now uses a control-room layout with sticky live preview, valid color/opacity editors, generated overlay URLs, and accessible switch controls.
+- **✅ Workspace Controls Added**: Settings now include an app-level Workspace section for Electron-style shell tuning: frame mode, message density, rail width, accent color, ambient glow, badge visibility, and selection-preview toggling.
+- **✅ Dashboard Command Deck Added**: The dashboard now uses a wider control-room shell with summary cards, live search, a configurable right rail, and an optional pinned-selection preview panel.
+- **✅ Responsive Settings Layout Added**: The settings screen now collapses from a 3-column desktop layout into 2-column and single-column variants so the preview remains usable on smaller windows.
+- **✅ Dashboard Feed Redesigned**: Message rows and event cards were rebuilt into a broadcast-console style and now respect shared avatar/timestamp visibility settings consistently.
+- **✅ Tailwind Integrated**: Tailwind CSS v4 is now active in the client alongside existing CSS tokens, allowing utility-driven layout work without discarding the current design language.
+- **✅ Build Stability Improved**: Added a dedicated `app/not-found.tsx` so `next build client` completes cleanly, and validated that a clean `.next` rebuild resolves the earlier transient dev-server manifest corruption.
+- **✅ README Rewritten**: Project documentation now reflects the real stack and workflow, including current routes, settings system, troubleshooting for `EADDRINUSE` and `.next` cache corruption, and the fact that Electron packaging is not yet in the repository.
+- **✅ Backend Startup Fixed**: `pnpm dev:backend` now actually starts Fastify on port 4100 by invoking `startBackend()` from the entrypoint. This resolves frontend `ERR_CONNECTION_REFUSED` failures when calling backend routes.
+- **✅ Dashboard Offline Handling Improved**: When the backend is unavailable, the dashboard now stops polling `/health`, `/chat/messages`, and `EventSource`-driven overlay sync from surfacing noisy runtime fetch errors; it falls back to a clear offline empty state instead.
 - **✅ YouTube Integration Live**: Backend connects to real YouTube Live chat and parses all message types
 - **✅ Modern UI Complete**: Dashboard features centered layout, gradient backgrounds, badges, and superchat displays
 - **✅ CORS Fixed**: Overlay SSE stream works cross-origin for OBS integration
@@ -62,4 +75,4 @@
 - **✅ Super Sticker Support**: Super sticker images now display correctly in both dashboard and overlay with proper error handling and accessibility labels
 - **✅ Leaderboard Badge Support**: YouTube leaderboard ranks (Top Chatter) now display with crown emoji and rank number next to usernames in both dashboard and overlay with golden styling
 - **✅ Live Poll Indicator**: Pulsing poll indicator shows in dashboard header when a YouTube poll is active, automatically hides when closed
-- **Next**: Implement user authentication, add persistent image cache, develop overlay theme controls
+- **Next**: Validate workspace settings against real live chat, implement user authentication, add persistent image cache, and decide on theme preset/export support

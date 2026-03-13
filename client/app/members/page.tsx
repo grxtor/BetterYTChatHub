@@ -2,9 +2,17 @@
 
 import { useEffect, useState, useRef } from 'react';
 import type { ChatMessage } from '@shared/chat';
+import { DEFAULT_APP_SETTINGS, type AppSettings } from '@shared/settings';
 import { proxyImageUrl } from '../../lib/imageProxy';
-
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://localhost:4100';
+import {
+    loadStoredSettings,
+    normalizeSettings,
+    persistSettings,
+    settingsAreEqual,
+    subscribeToSettingsChanges
+} from '../../lib/appSettings';
+import { applyAppTheme } from '../../lib/appTheme';
+import { BACKEND_URL } from '../../lib/runtime';
 
 type SelectionPayload = {
     message: ChatMessage | null;
@@ -20,30 +28,24 @@ export default function MembersOverlayPage() {
     const switchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
     // Full settings object state
-    const [settings, setSettings] = useState<any>({
-        membersOverlayScale: 1,
-        membersFontSize: 14,
-        membersOverlayBgColor: '',
-        membersOverlayTxColor: '',
-        membersCss: '',
-        customCss: '',
-        messageMaxWidth: 400,
-        overlayBgColor: 'rgba(20, 20, 22, 0.95)',
-        overlayTxColor: '#ffffff'
-    });
+    const [settings, setSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
+    const settingsRef = useRef(settings);
+    settingsRef.current = settings;
 
-    // Load settings from local storage
     useEffect(() => {
-        const saved = localStorage.getItem('better_yt_settings');
-        if (saved) {
-            try {
-                const parsed = JSON.parse(saved);
-                setSettings((prev: any) => ({ ...prev, ...parsed }));
-            } catch (e) {
-                console.error('Failed to load settings', e);
-            }
-        }
+        const initial = loadStoredSettings();
+        settingsRef.current = initial;
+        setSettings(initial);
+
+        return subscribeToSettingsChanges((incoming) => {
+            settingsRef.current = incoming;
+            setSettings((current) => settingsAreEqual(current, incoming) ? current : incoming);
+        });
     }, []);
+
+    useEffect(() => {
+        applyAppTheme(settings);
+    }, [settings]);
 
     useEffect(() => {
         if (connectionRef.current) return;
@@ -74,12 +76,10 @@ export default function MembersOverlayPage() {
         const onSettingsUpdate = (event: MessageEvent) => {
             try {
                 const newSettings = JSON.parse(event.data);
-                console.log('[Members] Received settings update:', newSettings);
-                setSettings((prev: any) => {
-                    const merged = { ...prev, ...newSettings };
-                    localStorage.setItem('better_yt_settings', JSON.stringify(merged));
-                    return merged;
-                });
+                const merged = normalizeSettings({ ...settingsRef.current, ...newSettings });
+                persistSettings(merged);
+                settingsRef.current = merged;
+                setSettings((current) => settingsAreEqual(current, merged) ? current : merged);
             } catch (err) {
                 console.error('Failed to parse settings event', err);
             }
@@ -203,7 +203,7 @@ export default function MembersOverlayPage() {
                     {/* Header Area */}
                     {(displayMessage.membershipGift || displayMessage.membershipGiftPurchase) ? (
                         <div className="overlay__membership-header">
-                            {displayMessage.authorPhoto && (
+                            {displayMessage.authorPhoto && settings.showAvatars !== false && (
                                 <img src={proxyImageUrl(displayMessage.authorPhoto)} alt={displayMessage.author} className="overlay__membership-avatar" />
                             )}
                             <div className="overlay__membership-info">
@@ -219,7 +219,7 @@ export default function MembersOverlayPage() {
                     ) : (
                         // Normal Header (for regular chat messages from Members)
                         <div className="overlay__header" style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '12px' }}>
-                            {displayMessage.authorPhoto && (
+                            {displayMessage.authorPhoto && settings.showAvatars !== false && (
                                 <img src={proxyImageUrl(displayMessage.authorPhoto)} alt="" className="overlay__avatar" style={{ width: '56px', height: '56px', borderRadius: '50%', objectFit: 'cover' }} />
                             )}
                             <div className="overlay__meta">

@@ -29,7 +29,8 @@ node_modules/
 *.sw?
 .codellm
 # OS specific
-
+AGENTS.md 
+memory-bank
 # Task files and project management
 .taskmaster/
 prd.txt 

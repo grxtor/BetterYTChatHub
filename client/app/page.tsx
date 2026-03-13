@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://localhost:4100';
+import { applyAppTheme } from '../lib/appTheme';
+import { loadStoredSettings, subscribeToSettingsChanges } from '../lib/appSettings';
+import { BACKEND_URL } from '../lib/runtime';
 
 interface FavoriteChannel {
   id: string;
@@ -52,6 +53,14 @@ export default function HomePage() {
         console.error('Failed to load favorites', e);
       }
     }
+  }, []);
+
+  useEffect(() => {
+    const initial = loadStoredSettings();
+    applyAppTheme(initial);
+    return subscribeToSettingsChanges((incoming) => {
+      applyAppTheme(incoming);
+    });
   }, []);
 
   // Save favorites to localStorage

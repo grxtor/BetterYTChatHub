@@ -24,6 +24,7 @@
 - Added responsive settings layout behavior so sidebar/content/preview collapse gracefully on narrower screens instead of assuming a fixed 3-column desktop-only layout.
 - Reworked dashboard message/event cards so avatar/timestamp visibility settings now apply consistently to normal chat rows, super chats, and member panels.
 - Rewrote the README to match the actual current codebase: Next.js 15 + Fastify web app, shared settings system, command-deck dashboard, overlay routes, and real troubleshooting steps for port conflicts / `.next` corruption. Removed inaccurate claims about a committed Electron wrapper.
+- Rewrote the README again in fully English product-documentation form and verified that user-facing strings across `client`, `backend`, `shared`, and `README.md` no longer contain Turkish text.
 - Fixed backend startup regression by invoking `startBackend()` from `backend/src/index.ts`; previously the dev command exited immediately without binding port 4100, causing frontend `ERR_CONNECTION_REFUSED` errors for `/chat/*`, `/overlay/*`, and `/health`.
 - Hardened dashboard connection flow so the UI treats the backend being offline as a normal state: `/health` failures now set `backendAvailable=false`, message polling and SSE subscription are paused until the backend is reachable again, and the empty state explains that the backend must be started on port 4100.
 - Fixed CORS issues by setting headers on raw response object after `reply.hijack()` for SSE endpoint

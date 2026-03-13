@@ -171,7 +171,7 @@ function resolveMessageText(item: any): string {
     return item.message.runs.map((run: any) => {
       // Handle emoji objects - for custom emojis, use the shortcut text
       if (run.emoji) {
-        // For custom emojis, use the first shortcut (e.g., ":_heçkır:")
+        // For custom emojis, use the first shortcut (e.g., ":smile:")
         if (run.emoji.is_custom && run.emoji.shortcuts?.[0]) {
           return run.emoji.shortcuts[0];
         }
@@ -457,7 +457,7 @@ function normalizeAction(action: any): ChatMessage | null {
     let giftCount: number | undefined;
     if (isGiftPurchase) {
       const primaryText = item.header?.primary_text?.text || '';
-      // Extract number from "Sent 1 Yusuf İpek gift memberships"
+      // Extract number from strings such as "Sent 1 gift membership"
       const countMatch = primaryText.match(/sent\s+(\d+)\s+/i);
       if (countMatch) {
         giftCount = parseInt(countMatch[1], 10);

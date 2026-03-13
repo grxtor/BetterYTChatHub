@@ -58,6 +58,7 @@
 - **✅ Tailwind Integrated**: Tailwind CSS v4 is now active in the client alongside existing CSS tokens, allowing utility-driven layout work without discarding the current design language.
 - **✅ Build Stability Improved**: Added a dedicated `app/not-found.tsx` so `next build client` completes cleanly, and validated that a clean `.next` rebuild resolves the earlier transient dev-server manifest corruption.
 - **✅ README Rewritten**: Project documentation now reflects the real stack and workflow, including current routes, settings system, troubleshooting for `EADDRINUSE` and `.next` cache corruption, and the fact that Electron packaging is not yet in the repository.
+- **✅ English Localization Cleanup**: README and remaining user-facing string surface were checked for Turkish text; the app and docs are now aligned to English-only wording.
 - **✅ Backend Startup Fixed**: `pnpm dev:backend` now actually starts Fastify on port 4100 by invoking `startBackend()` from the entrypoint. This resolves frontend `ERR_CONNECTION_REFUSED` failures when calling backend routes.
 - **✅ Dashboard Offline Handling Improved**: When the backend is unavailable, the dashboard now stops polling `/health`, `/chat/messages`, and `EventSource`-driven overlay sync from surfacing noisy runtime fetch errors; it falls back to a clear offline empty state instead.
 - **✅ YouTube Integration Live**: Backend connects to real YouTube Live chat and parses all message types

@@ -70,17 +70,14 @@ BetterYTChatHub solves that by turning chat into a real control surface.
 
 ## Screenshots
 
-### Settings
-
-![Settings](ScreenShots/settings.png)
-
-### Overlay
-
-![Overlay](ScreenShots/overlay.png)
-
-### Message Selection
-
-![Message Selection](ScreenShots/select_text.png)
+| Feature | Preview |
+| --- | --- |
+| **Dashboard** | ![Dashboard](ScreenShots/dashboard.png) |
+| **Settings** | ![Settings](ScreenShots/settings.png) |
+| **Overlay** | ![Overlay](ScreenShots/overlay.png) |
+| **Super Chat** | ![Super Chat](ScreenShots/superchat.png) |
+| **Members** | ![Members](ScreenShots/members.png) |
+| **Message Selection** | ![Message Selection](ScreenShots/select_text.png) |
 
 ## Tech Stack
 

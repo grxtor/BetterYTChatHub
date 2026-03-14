@@ -4,6 +4,7 @@ pnpm-lock.yaml
 .env
 .DS_Store
 .next
+.next-cache
 out
 dist
 coverage
@@ -35,6 +36,9 @@ Ekran Resmi*
 *.jpeg
 *.gif
 *.bmp
+
+# Screenshots
+image/package/
 
 # Database
 *.db

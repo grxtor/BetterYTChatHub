@@ -7,9 +7,11 @@ import {
   useMemo,
   useRef,
   useState,
+  memo,
   type CSSProperties,
   type MouseEvent,
 } from 'react';
+import { useRouter } from 'next/navigation';
 import type { ChatMessage } from '@shared/chat';
 import { DEFAULT_APP_SETTINGS, type AppSettings } from '@shared/settings';
 import { useTimezone } from '../../lib/TimezoneContext';
@@ -23,101 +25,152 @@ import {
 } from '../../lib/appSettings';
 import { applyAppTheme } from '../../lib/appTheme';
 import { BACKEND_URL } from '../../lib/runtime';
+import { loadSavedChannels, addSavedChannel, removeSavedChannel } from '../../lib/savedChannels';
+import { type SavedChannel } from '@shared/settings';
 import TopBar from '../components/TopBar';
+import { DashboardIcons } from '../components/Icons';
+import { DraggableCard } from '../components/DraggableCard';
 
-const POLL_INTERVAL = 2500;
-
-let globalSSEConnection: EventSource | null = null;
-let globalConnectionListeners: Set<(payload: any) => void> = new Set();
+const STREAM_MESSAGE_LIMIT = 200;
+const VIRTUAL_LIST_OVERSCAN = 6;
 
 /**
  * CUSTOM HOOKS
  */
 
-function useChatMessages(enabled: boolean) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [error, setError] = useState<Error | null>(null);
+function appendStreamMessage(messages: ChatMessage[], message: ChatMessage) {
+  if (messages.length < STREAM_MESSAGE_LIMIT) {
+    return [...messages, message];
+  }
 
-  const refresh = useCallback(async () => {
-    if (!enabled) {
-      setMessages([]);
-      setError(null);
-      return;
-    }
-
-    try {
-      const response = await fetch(`${BACKEND_URL}/chat/messages`);
-      if (!response.ok) throw new Error(`Request failed: ${response.status}`);
-      const data = await response.json();
-      setMessages(Array.isArray(data.messages) ? data.messages : []);
-      setError(null);
-    } catch (err) {
-      setError(err as Error);
-    }
-  }, [enabled]);
-
-  useEffect(() => {
-    refresh();
-    if (!enabled) {
-      return;
-    }
-
-    const timer = setInterval(refresh, POLL_INTERVAL);
-    return () => clearInterval(timer);
-  }, [enabled, refresh]);
-
-  return { messages, refresh, error };
+  const next = messages.slice(1);
+  next.push(message);
+  return next;
 }
 
-function useOverlaySelection(enabled: boolean) {
+function useChatStream() {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [metrics, setMetrics] = useState<DashboardMetrics>({ superChats: 0, members: 0, messages: 0 });
+  const [backendAvailable, setBackendAvailable] = useState(false);
+  const retryCountRef = useRef(0);
+  const sourceRef = useRef<EventSource | null>(null);
+  const retryTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const connect = useCallback(() => {
+    const source = new EventSource(`${BACKEND_URL}/chat/stream`);
+    sourceRef.current = source;
+    source.onopen = () => {
+      retryCountRef.current = 0;
+      setBackendAvailable(true);
+    };
+
+    source.addEventListener('backlog', (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data);
+        const msgs: ChatMessage[] = Array.isArray(data.messages) ? data.messages : [];
+        setMessages(msgs.slice(-STREAM_MESSAGE_LIMIT));
+        
+        let sc = 0, mem = 0;
+        msgs.forEach(m => {
+          if (m.superChat) sc++;
+          if (m.membershipGift || m.membershipGiftPurchase || m.isMember || m.membershipLevel) mem++;
+        });
+        setMetrics({ superChats: sc, members: mem, messages: msgs.length });
+      } catch { /* ignore parse errors */ }
+    });
+
+    source.addEventListener('message', (e: MessageEvent) => {
+      try {
+        const msg: ChatMessage = JSON.parse(e.data);
+        setMessages((prev) => appendStreamMessage(prev, msg));
+        setMetrics(prev => {
+          const isSc = !!msg.superChat;
+          const isMem = !!(msg.membershipGift || msg.membershipGiftPurchase || msg.isMember || msg.membershipLevel);
+          return {
+            superChats: prev.superChats + (isSc ? 1 : 0),
+            members: prev.members + (isMem ? 1 : 0),
+            messages: prev.messages + 1
+          };
+        });
+      } catch { /* ignore parse errors */ }
+    });
+
+    source.addEventListener('heartbeat', () => {
+      retryCountRef.current = 0;
+    });
+
+    source.onerror = () => {
+      setBackendAvailable(false);
+      source.close();
+      sourceRef.current = null;
+      const count = retryCountRef.current++;
+      const delay = Math.min(1000 * Math.pow(2, count), 30000);
+      retryTimerRef.current = setTimeout(connect, delay);
+    };
+  }, []);
+
+  useEffect(() => {
+    connect();
+    return () => {
+      sourceRef.current?.close();
+      sourceRef.current = null;
+      setBackendAvailable(false);
+      if (retryTimerRef.current) {
+        clearTimeout(retryTimerRef.current);
+      }
+    };
+  }, [connect]);
+
+  return { messages, backendAvailable, metrics, error: null };
+}
+
+function useOverlayStream(enabled: boolean) {
   const [selection, setSelection] = useState<ChatMessage | null>(null);
-  const listenerRef = useRef<((payload: any) => void) | null>(null);
+  const [remoteSettings, setRemoteSettings] = useState<AppSettings | null>(null);
+  const sourceRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
     if (!enabled) {
-      if (globalSSEConnection) {
-        globalSSEConnection.close();
-        globalSSEConnection = null;
-      }
-      globalConnectionListeners.clear();
+      sourceRef.current?.close();
+      sourceRef.current = null;
       setSelection(null);
+      setRemoteSettings(null);
       return;
     }
 
-    if (!globalSSEConnection) {
-      globalSSEConnection = new EventSource(`${BACKEND_URL}/overlay/stream`);
-      globalSSEConnection.addEventListener('selection', ((event: MessageEvent) => {
-        try {
-          const payload = JSON.parse(event.data);
-          globalConnectionListeners.forEach(listener => listener(payload));
-        } catch (error) {
-          console.error(error);
-        }
-      }) as EventListener);
-    }
+    const source = new EventSource(`${BACKEND_URL}/overlay/stream`);
+    sourceRef.current = source;
 
-    const myListener = (payload: any) => {
-      setSelection(payload.message);
-    };
+    source.addEventListener('selection', (event: MessageEvent) => {
+      try {
+        const payload = JSON.parse(event.data);
+        setSelection(payload.message ?? null);
+      } catch (error) {
+        console.error(error);
+      }
+    });
 
-    listenerRef.current = myListener;
-    globalConnectionListeners.add(myListener);
+    source.addEventListener('settings', (event: MessageEvent) => {
+      try {
+        setRemoteSettings(normalizeSettings(JSON.parse(event.data)));
+      } catch (error) {
+        console.error('Failed to parse settings event', error);
+      }
+    });
 
     return () => {
-      if (listenerRef.current) {
-        globalConnectionListeners.delete(listenerRef.current);
-      }
+      source.close();
+      sourceRef.current = null;
     };
   }, [enabled]);
 
-  return { selection };
+  return { selection, remoteSettings };
 }
 
-function useConnection() {
+function useConnection(backendAvailable: boolean) {
   const [connected, setConnected] = useState(false);
   const [liveId, setLiveId] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
-  const [backendAvailable, setBackendAvailable] = useState(false);
 
   const checkStatus = useCallback(async () => {
     try {
@@ -126,21 +179,27 @@ function useConnection() {
         throw new Error(`Health request failed: ${response.status}`);
       }
       const data = await response.json();
-      setBackendAvailable(true);
-      setConnected(data.connected);
+      setConnected(Boolean(data.connected));
       setLiveId(data.liveId);
     } catch {
-      setBackendAvailable(false);
       setConnected(false);
       setLiveId(null);
     }
   }, []);
 
   useEffect(() => {
-    checkStatus();
-    const interval = setInterval(checkStatus, 5000);
-    return () => clearInterval(interval);
+    void checkStatus();
   }, [checkStatus]);
+
+  useEffect(() => {
+    if (!backendAvailable) {
+      setConnected(false);
+      setLiveId(null);
+      return;
+    }
+
+    void checkStatus();
+  }, [backendAvailable, checkStatus]);
 
   const connect = useCallback(async (liveId: string) => {
     if (!backendAvailable) {
@@ -169,7 +228,6 @@ function useConnection() {
       await fetch(`${BACKEND_URL}/chat/disconnect`, { method: 'POST' });
       await checkStatus();
     } catch {
-      setBackendAvailable(false);
       setConnected(false);
       setLiveId(null);
     }
@@ -178,75 +236,22 @@ function useConnection() {
   return { backendAvailable, connected, liveId, connect, disconnect, connecting };
 }
 
-/**
- * SVG ICONS
- */
-const Icons = {
-  Copy: () => (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-    </svg>
-  ),
-  Pin: () => (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="12" y1="17" x2="12" y2="22" />
-      <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z" />
-    </svg>
-  )
-};
-
-const DENSITY_STYLES = {
-  compact: {
-    row: 'gap-2.5 rounded-[18px] p-3',
-    avatar: 'h-10 w-10 rounded-xl',
-    fallbackAvatar: 'h-10 w-10 rounded-xl text-xs',
-    body: 'mt-1.5 text-[13px] leading-5',
-    author: 'text-[14px]',
-    timestamp: 'text-[10px]',
-    action: 'h-8 w-8 rounded-lg',
-  },
-  comfortable: {
-    row: 'gap-3 rounded-[20px] p-4',
-    avatar: 'h-11 w-11 rounded-2xl',
-    fallbackAvatar: 'h-11 w-11 rounded-2xl text-sm',
-    body: 'mt-2 text-[14px] leading-6',
-    author: 'text-[15px]',
-    timestamp: 'text-[11px]',
-    action: 'h-9 w-9 rounded-xl',
-  },
-  immersive: {
-    row: 'gap-4 rounded-[24px] p-5',
-    avatar: 'h-12 w-12 rounded-[18px]',
-    fallbackAvatar: 'h-12 w-12 rounded-[18px] text-sm',
-    body: 'mt-2.5 text-[15px] leading-7',
-    author: 'text-[16px]',
-    timestamp: 'text-xs',
-    action: 'h-10 w-10 rounded-xl',
-  },
-} as const;
-
-type DensityStyles = (typeof DENSITY_STYLES)[keyof typeof DENSITY_STYLES];
-
-function getDensityStyles(density: AppSettings['dashboardDensity']) {
-  return DENSITY_STYLES[density];
+function getEstimatedRowHeight(density: AppSettings['dashboardDensity']) {
+  switch (density) {
+    case 'compact':
+      return 88;
+    case 'immersive':
+      return 116;
+    case 'comfortable':
+    default:
+      return 100;
+  }
 }
 
-function getMessageKind(message: ChatMessage | null) {
-  if (!message) {
-    return 'Chat';
-  }
 
-  if (message.superChat) {
-    return 'Super Chat';
-  }
 
-  if (message.membershipGift || message.membershipGiftPurchase || message.membershipLevel) {
-    return 'Member';
-  }
+import { MessageRow, getDensityStyles, type DensityStyles } from './components/MessageRow';
 
-  return 'Chat';
-}
 
 function getMessageSearchValue(message: ChatMessage) {
   const runText = message.runs?.map((run) => run.text || '').join(' ') ?? '';
@@ -257,466 +262,10 @@ function getMessageSearchValue(message: ChatMessage) {
  * COMPONENTS
  */
 
-function MessageBadges({
-  message,
-  enabled = true,
-}: {
-  message: ChatMessage;
-  enabled?: boolean;
-}) {
-  if (!enabled || (!message.badges?.length && !message.leaderboardRank)) {
-    return null;
-  }
-
-  return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      {message.badges?.map((badge, index) => (
-        <span
-          key={`${badge.type}-${index}`}
-          className="inline-flex items-center gap-1 rounded-full border border-white/8 bg-white/6 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-app-text-secondary"
-        >
-          {badge.imageUrl ? (
-            <img
-              src={proxyImageUrl(badge.imageUrl)}
-              alt={badge.label || badge.type}
-              className="h-3.5 w-3.5 rounded-full object-cover"
-            />
-          ) : badge.icon ? (
-            <span>{badge.icon}</span>
-          ) : null}
-          <span>{badge.label || badge.type}</span>
-        </span>
-      ))}
-      {message.leaderboardRank ? (
-        <span className="inline-flex items-center gap-1 rounded-full border border-amber-400/25 bg-amber-400/12 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-amber-200">
-          <span>👑</span>
-          <span>#{message.leaderboardRank}</span>
-        </span>
-      ) : null}
-    </div>
-  );
-}
-
-function MessageContent({
-  message,
-  className,
-}: {
-  message: ChatMessage;
-  className: string;
-}) {
-  if (message.runs?.length) {
-    return (
-      <p className={className}>
-        {message.runs.map((run, index) =>
-          run.emojiUrl ? (
-            <img
-              key={`${message.id}-emoji-${index}`}
-              src={proxyImageUrl(run.emojiUrl)}
-              alt={run.emojiAlt || 'emoji'}
-              className="mx-0.5 inline h-5 w-5 align-[-0.35em]"
-            />
-          ) : (
-            <span key={`${message.id}-text-${index}`}>{run.text}</span>
-          ),
-        )}
-      </p>
-    );
-  }
-
-  if (!message.text || message.text === 'N/A') {
-    return null;
-  }
-
-  return <p className={className}>{message.text}</p>;
-}
-
-function MessageRow({
-  message,
-  isSelected,
-  onSelect,
-  onCopy,
-  onFilterUser,
-  onContextMenu,
-  densityStyles,
-  showBadges = true,
-  showAvatars = true,
-  showTimestamps = true,
-}: {
-  message: ChatMessage;
-  isSelected: boolean;
-  onSelect: () => void;
-  onCopy: (text: string) => void;
-  onFilterUser: (author: string) => void;
-  onContextMenu: (e: MouseEvent<HTMLDivElement>) => void;
-  densityStyles: DensityStyles;
-  showBadges?: boolean;
-  showAvatars?: boolean;
-  showTimestamps?: boolean;
-}) {
-  const { timezone } = useTimezone();
-
-  return (
-    <div
-      className={`group grid border transition ${densityStyles.row} ${
-        showAvatars ? 'grid-cols-[auto_minmax(0,1fr)_auto]' : 'grid-cols-[minmax(0,1fr)_auto]'
-      } ${
-        isSelected
-          ? 'border-app-accent/45 bg-app-accent/10 shadow-[0_0_0_1px_rgba(129,140,248,0.18),0_20px_45px_rgba(15,23,42,0.45)]'
-          : 'border-white/7 bg-[linear-gradient(180deg,rgba(24,24,27,0.92),rgba(17,17,19,0.9))] hover:border-white/12 hover:bg-[linear-gradient(180deg,rgba(31,31,35,0.95),rgba(24,24,27,0.94))]'
-      }`}
-      onClick={onSelect}
-      onContextMenu={onContextMenu}
-    >
-      {showAvatars && message.authorPhoto && (
-        <img
-          src={proxyImageUrl(message.authorPhoto)}
-          alt=""
-          className={`${densityStyles.avatar} border border-white/8 object-cover shadow-md shadow-black/40`}
-        />
-      )}
-      {showAvatars && !message.authorPhoto && (
-        <div className={`grid place-items-center border border-white/8 bg-gradient-to-br from-app-accent/45 to-sky-500/30 font-semibold text-white shadow-md shadow-black/30 ${densityStyles.fallbackAvatar}`}>
-          {message.author.charAt(0).toUpperCase()}
-        </div>
-      )}
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-start gap-2">
-          <button
-            type="button"
-            className={`truncate text-left font-semibold tracking-[-0.01em] text-app-text transition hover:text-app-accent ${densityStyles.author}`}
-            onClick={(e) => { e.stopPropagation(); onFilterUser(message.author); }}
-            title={`Filter by ${message.author}`}
-          >
-            {message.author}
-          </button>
-          <MessageBadges message={message} enabled={showBadges} />
-          {showTimestamps && (
-            <span className={`ml-auto shrink-0 rounded-full border border-white/8 bg-white/4 px-2 py-0.5 font-medium text-app-text-subtle ${densityStyles.timestamp}`}>
-              {formatTimestamp(message.publishedAt, timezone)}
-            </span>
-          )}
-        </div>
-        <MessageContent
-          message={message}
-          className={`${densityStyles.body} text-app-text-secondary`}
-        />
-      </div>
-
-      <div className="flex items-start gap-2 opacity-100 transition md:opacity-60 md:group-hover:opacity-100">
-        <button
-          type="button"
-          className={`grid place-items-center border border-white/8 bg-white/4 text-app-text-muted transition hover:border-app-accent/30 hover:bg-app-accent/10 hover:text-app-text ${densityStyles.action}`}
-          onClick={(e) => { e.stopPropagation(); onSelect(); }}
-          title="Pin to overlay"
-        >
-          <Icons.Pin />
-        </button>
-        <button
-          type="button"
-          className={`grid place-items-center border border-white/8 bg-white/4 text-app-text-muted transition hover:border-app-accent/30 hover:bg-app-accent/10 hover:text-app-text ${densityStyles.action}`}
-          onClick={(e) => { e.stopPropagation(); onCopy(message.text); }}
-          title="Copy"
-        >
-          <Icons.Copy />
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function SuperChatItem({
-  message,
-  isSelected,
-  onSelect,
-  densityStyles,
-  showAvatars = true,
-  showTimestamps = true,
-}: {
-  message: ChatMessage;
-  isSelected: boolean;
-  onSelect: () => void;
-  densityStyles: DensityStyles;
-  showAvatars?: boolean;
-  showTimestamps?: boolean;
-}) {
-  const { timezone } = useTimezone();
-  return (
-    <div
-      className={`rounded-3xl border p-4 transition ${
-        isSelected
-          ? 'border-amber-300/35 bg-amber-400/12 shadow-[0_0_0_1px_rgba(251,191,36,0.18)]'
-          : 'border-white/7 bg-[linear-gradient(180deg,rgba(43,32,14,0.92),rgba(24,18,10,0.9))] hover:border-amber-300/18'
-      }`}
-      onClick={onSelect}
-    >
-      <div className="flex items-start gap-3">
-        {showAvatars && message.authorPhoto ? (
-          <img
-            src={proxyImageUrl(message.authorPhoto)}
-            alt=""
-            className={`${densityStyles.avatar} border border-amber-200/10 object-cover`}
-          />
-        ) : showAvatars ? (
-          <div className={`grid place-items-center border border-amber-200/10 bg-gradient-to-br from-amber-400/35 to-orange-500/20 font-semibold text-white ${densityStyles.fallbackAvatar}`}>
-            {message.author.charAt(0).toUpperCase()}
-          </div>
-        ) : null}
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <div className={`truncate font-semibold text-app-text ${densityStyles.author}`}>{message.author}</div>
-            <span className="rounded-full border border-amber-300/20 bg-amber-300/12 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-amber-100">
-              Super Chat
-            </span>
-          </div>
-          {showTimestamps ? (
-            <div className={`mt-1 text-amber-100/70 ${densityStyles.timestamp}`}>
-              {formatTimestamp(message.publishedAt, timezone)}
-            </div>
-          ) : null}
-        </div>
-        {message.superChat && (
-          <div className="rounded-2xl border border-amber-300/25 bg-amber-300/12 px-3 py-1 text-sm font-semibold text-amber-50">
-            {message.superChat.amount}
-          </div>
-        )}
-      </div>
-      <MessageContent
-        message={message}
-        className={`${densityStyles.body} text-amber-50/85`}
-      />
-      {message.superChat?.stickerUrl ? (
-        <div className="mt-3 rounded-2xl border border-amber-300/10 bg-black/10 p-3">
-          <img
-            src={proxyImageUrl(message.superChat.stickerUrl)}
-            alt={message.superChat.stickerAlt || 'Super sticker'}
-            className="mx-auto max-h-28 w-auto"
-          />
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function MemberItem({
-  message,
-  isSelected,
-  onSelect,
-  densityStyles,
-  showAvatars = true,
-  showTimestamps = true,
-}: {
-  message: ChatMessage;
-  isSelected: boolean;
-  onSelect: () => void;
-  densityStyles: DensityStyles;
-  showAvatars?: boolean;
-  showTimestamps?: boolean;
-}) {
-  const { timezone } = useTimezone();
-  return (
-    <div
-      className={`rounded-3xl border p-4 transition ${
-        isSelected
-          ? 'border-emerald-300/30 bg-emerald-400/10 shadow-[0_0_0_1px_rgba(52,211,153,0.18)]'
-          : 'border-white/7 bg-[linear-gradient(180deg,rgba(8,43,31,0.82),rgba(9,24,18,0.9))] hover:border-emerald-300/18'
-      }`}
-      onClick={onSelect}
-    >
-      <div className="flex items-start gap-3">
-        {showAvatars && message.authorPhoto ? (
-          <img
-            src={proxyImageUrl(message.authorPhoto)}
-            alt=""
-            className={`${densityStyles.avatar} border border-emerald-200/10 object-cover`}
-          />
-        ) : showAvatars ? (
-          <div className={`grid place-items-center border border-emerald-200/10 bg-gradient-to-br from-emerald-400/35 to-teal-500/20 font-semibold text-white ${densityStyles.fallbackAvatar}`}>
-            {message.author.charAt(0).toUpperCase()}
-          </div>
-        ) : null}
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <div className={`truncate font-semibold text-app-text ${densityStyles.author}`}>{message.author}</div>
-            <span className="rounded-full border border-emerald-300/20 bg-emerald-300/12 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-emerald-100">
-              {message.membershipGiftPurchase ? 'Gifted' : 'Member'}
-            </span>
-          </div>
-          {showTimestamps ? (
-            <div className={`mt-1 text-emerald-100/70 ${densityStyles.timestamp}`}>
-              {formatTimestamp(message.publishedAt, timezone)}
-            </div>
-          ) : null}
-        </div>
-      </div>
-      <div className={`${densityStyles.body} text-emerald-50/85`}>
-        {message.membershipGiftPurchase && message.giftCount
-          ? `${message.giftCount} gift membership${message.giftCount > 1 ? 's' : ''} sent`
-          : message.membershipLevel || 'New member alert'}
-      </div>
-    </div>
-  );
-}
-
-function MetricCard({
-  label,
-  value,
-  hint,
-  toneClass,
-}: {
-  label: string;
-  value: string;
-  hint: string;
-  toneClass: string;
-}) {
-  return (
-    <div className="rounded-[24px] border border-white/8 bg-[linear-gradient(180deg,rgba(24,24,27,0.94),rgba(14,14,17,0.98))] p-4 shadow-panel">
-      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-app-text-subtle">
-        {label}
-      </div>
-      <div className={`mt-3 text-2xl font-semibold tracking-[-0.04em] ${toneClass}`}>
-        {value}
-      </div>
-      <div className="mt-1 text-sm text-app-text-muted">{hint}</div>
-    </div>
-  );
-}
-
-function SelectionPreviewCard({
-  selection,
-  densityStyles,
-  showAvatars,
-  showBadges,
-  showTimestamps,
-  onClear,
-}: {
-  selection: ChatMessage | null;
-  densityStyles: DensityStyles;
-  showAvatars: boolean;
-  showBadges: boolean;
-  showTimestamps: boolean;
-  onClear: () => void;
-}) {
-  const { timezone } = useTimezone();
-
-  return (
-    <section className="overflow-hidden rounded-[28px] border border-app-accent/18 bg-[linear-gradient(180deg,rgba(26,27,37,0.94),rgba(15,16,23,0.98))] shadow-[0_24px_60px_rgba(15,23,42,0.48)]">
-      <div className="flex items-center gap-3 border-b border-white/6 px-5 py-4">
-        <div>
-          <span className="text-xs font-semibold uppercase tracking-[0.14em] text-app-accent/80">
-            Overlay Preview
-          </span>
-          <h3 className="mt-1 text-base font-semibold text-app-text">
-            {selection ? getMessageKind(selection) : 'Pinned Message'}
-          </h3>
-        </div>
-        <div className="flex-1" />
-        {selection ? (
-          <button
-            type="button"
-            className="rounded-full border border-white/8 bg-white/5 px-3 py-1.5 text-xs font-semibold text-app-text-secondary transition hover:border-app-accent/30 hover:bg-app-accent/10 hover:text-app-text"
-            onClick={onClear}
-          >
-            Clear
-          </button>
-        ) : null}
-      </div>
-      <div className="p-4">
-        {selection ? (
-          <div className="rounded-[24px] border border-app-accent/16 bg-black/20 p-4">
-            <div className="flex items-start gap-3">
-              {showAvatars ? (
-                selection.authorPhoto ? (
-                  <img
-                    src={proxyImageUrl(selection.authorPhoto)}
-                    alt=""
-                    className={`${densityStyles.avatar} border border-white/10 object-cover`}
-                  />
-                ) : (
-                  <div className={`grid place-items-center border border-white/10 bg-gradient-to-br from-app-accent/55 to-sky-500/30 font-semibold text-white ${densityStyles.fallbackAvatar}`}>
-                    {selection.author.charAt(0).toUpperCase()}
-                  </div>
-                )
-              ) : null}
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-start gap-2">
-                  <div className={`truncate font-semibold text-app-text ${densityStyles.author}`}>
-                    {selection.author}
-                  </div>
-                  <MessageBadges message={selection} enabled={showBadges} />
-                  {showTimestamps ? (
-                    <span className={`ml-auto rounded-full border border-white/8 bg-white/4 px-2 py-0.5 font-medium text-app-text-subtle ${densityStyles.timestamp}`}>
-                      {formatTimestamp(selection.publishedAt, timezone)}
-                    </span>
-                  ) : null}
-                </div>
-                <MessageContent
-                  message={selection}
-                  className={`${densityStyles.body} text-app-text-secondary`}
-                />
-                {selection.superChat?.amount ? (
-                  <div className="mt-3 inline-flex rounded-full border border-amber-300/20 bg-amber-300/12 px-3 py-1 text-xs font-semibold text-amber-100">
-                    {selection.superChat.amount}
-                  </div>
-                ) : null}
-                {selection.membershipGiftPurchase || selection.membershipLevel ? (
-                  <div className="mt-3 inline-flex rounded-full border border-emerald-300/18 bg-emerald-300/12 px-3 py-1 text-xs font-semibold text-emerald-100">
-                    {selection.membershipGiftPurchase
-                      ? `${selection.giftCount || 1} gift membership${selection.giftCount && selection.giftCount > 1 ? 's' : ''}`
-                      : selection.membershipLevel || 'Member highlight'}
-                  </div>
-                ) : null}
-                {selection.superChat?.stickerUrl ? (
-                  <div className="mt-3 rounded-[20px] border border-amber-300/10 bg-black/20 p-3">
-                    <img
-                      src={proxyImageUrl(selection.superChat.stickerUrl)}
-                      alt={selection.superChat.stickerAlt || 'Super sticker'}
-                      className="mx-auto max-h-28 w-auto"
-                    />
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          </div>
-        ) : (
-          <EmptyState
-            icon="📌"
-            title="Nothing pinned yet"
-            description="Select any message from the feed or event rail to preview what OBS will receive."
-            small
-          />
-        )}
-      </div>
-    </section>
-  );
-}
-
-function EmptyState({
-  icon,
-  title,
-  description,
-  small = false
-}: {
-  icon: string;
-  title: string;
-  description: string;
-  small?: boolean;
-}) {
-  return (
-    <div
-      className={`flex h-full flex-col items-center justify-center rounded-[28px] border border-dashed border-white/8 bg-white/[0.03] text-center ${
-        small ? 'min-h-[180px] px-5 py-8' : 'min-h-[360px] px-8 py-14'
-      }`}
-    >
-      <div className={`${small ? 'text-3xl' : 'text-5xl'}`}>{icon}</div>
-      <h3 className={`mt-4 font-semibold text-app-text ${small ? 'text-base' : 'text-xl'}`}>
-        {title}
-      </h3>
-      <p className={`mt-2 max-w-sm text-app-text-muted ${small ? 'text-sm' : 'text-base'}`}>
-        {description}
-      </p>
-    </div>
-  );
-}
+import { SuperChatItem, MemberItem } from './components/DashboardItems';
+import { SelectionPreviewCard } from './components/SelectionPreviewCard';
+import { DashboardStats, type DashboardMetrics } from './components/DashboardStats';
+import { EmptyStateCard } from './components/EmptyStateCard';
 
 function Toast({ message, onClose }: { message: string | null; onClose: () => void }) {
   if (!message) return null;
@@ -735,15 +284,22 @@ function Toast({ message, onClose }: { message: string | null; onClose: () => vo
  */
 
 export default function DashboardPage() {
-  const { backendAvailable, connected, liveId, connect, disconnect, connecting } = useConnection();
-  const { messages } = useChatMessages(backendAvailable);
-  const { selection } = useOverlaySelection(backendAvailable);
+  const router = useRouter();
+  const { messages, backendAvailable, metrics } = useChatStream();
+  const { connected, liveId, connect, disconnect, connecting } = useConnection(backendAvailable);
+  const { selection, remoteSettings } = useOverlayStream(backendAvailable);
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [streamInput, setStreamInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [userFilter, setUserFilter] = useState<string | null>(null);
   const [autoScroll, setAutoScroll] = useState(true); // Auto-scroll enabled by default
+  const [savedChannels, setSavedChannels] = useState<SavedChannel[]>([]);
+
+  // Load saved channels only on client to avoid hydration mismatch
+  useEffect(() => {
+    setSavedChannels(loadSavedChannels());
+  }, []);
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
@@ -753,6 +309,8 @@ export default function DashboardPage() {
   const chatListRef = useRef<HTMLDivElement>(null);
   const prevMessageCountRef = useRef(0);
   const isAutoScrolling = useRef(false);
+  const [chatViewportHeight, setChatViewportHeight] = useState(0);
+  const [chatScrollTop, setChatScrollTop] = useState(0);
 
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
   const deferredSearchQuery = useDeferredValue(searchQuery);
@@ -765,31 +323,27 @@ export default function DashboardPage() {
     const initial = loadStoredSettings();
     setSettings(initial);
 
-    const settingsListener = (event: MessageEvent) => {
-      try {
-        const incoming = JSON.parse(event.data);
-        setSettings((current) => {
-          const merged = normalizeSettings({ ...current, ...incoming });
-          return settingsAreEqual(current, merged) ? current : merged;
-        });
-      } catch (error) {
-        console.error('Failed to parse settings event', error);
-      }
-    };
-
     const unsubscribe = subscribeToSettingsChanges((incoming) => {
       setSettings((current) =>
         settingsAreEqual(current, incoming) ? current : incoming,
       );
     });
 
-    globalSSEConnection?.addEventListener('settings', settingsListener as EventListener);
-
     return () => {
       unsubscribe();
-      globalSSEConnection?.removeEventListener('settings', settingsListener as EventListener);
     };
-  }, [backendAvailable]);
+  }, []);
+
+  useEffect(() => {
+    if (!remoteSettings) {
+      return;
+    }
+
+    setSettings((current) => {
+      const merged = normalizeSettings({ ...current, ...remoteSettings });
+      return settingsAreEqual(current, merged) ? current : merged;
+    });
+  }, [remoteSettings]);
 
   useEffect(() => {
     applyAppTheme(settings);
@@ -807,6 +361,23 @@ export default function DashboardPage() {
       setStreamInput('');
     }
   };
+
+  const handleSaveChannel = (label: string, videoId: string) => {
+    setSavedChannels(addSavedChannel({ label, videoId }));
+  };
+
+  const handleRemoveChannel = (videoId: string) => {
+    setSavedChannels(removeSavedChannel(videoId));
+  };
+
+  const handleSelectChannel = (videoId: string) => {
+    connect(videoId);
+  };
+
+  const handleDisconnect = useCallback(async () => {
+    await disconnect();
+    router.push('/');
+  }, [disconnect, router]);
 
   const handleSelect = useCallback(
     async (message: ChatMessage) => {
@@ -848,6 +419,10 @@ export default function DashboardPage() {
     () => getDensityStyles(settings.dashboardDensity),
     [settings.dashboardDensity],
   );
+  const estimatedRowHeight = useMemo(
+    () => getEstimatedRowHeight(settings.dashboardDensity),
+    [settings.dashboardDensity],
+  );
 
   // Apply user and query filter
   const filteredMessages = useMemo(() => {
@@ -866,12 +441,6 @@ export default function DashboardPage() {
     });
   }, [deferredSearchQuery, regularMessages, userFilter]);
 
-  const uniqueAuthors = useMemo(
-    () => new Set(regularMessages.map((message) => message.author)).size,
-    [regularMessages],
-  );
-
-  const railSpecialCount = superChats.length + newMembers.length;
 
   const dashboardShellStyle = useMemo(
     () =>
@@ -880,6 +449,35 @@ export default function DashboardPage() {
       }) as CSSProperties,
     [settings.dashboardPanelWidth],
   );
+
+  const virtualizedFeed = useMemo(() => {
+    const viewportHeight = Math.max(chatViewportHeight, estimatedRowHeight);
+    const startIndex = Math.max(
+      0,
+      Math.floor(chatScrollTop / estimatedRowHeight) - VIRTUAL_LIST_OVERSCAN,
+    );
+    const endIndex = Math.min(
+      filteredMessages.length,
+      Math.ceil((chatScrollTop + viewportHeight) / estimatedRowHeight) + VIRTUAL_LIST_OVERSCAN,
+    );
+    const visibleMessages = filteredMessages.slice(startIndex, endIndex);
+    const topSpacerHeight = startIndex * estimatedRowHeight;
+    const bottomSpacerHeight = Math.max(
+      0,
+      (filteredMessages.length - endIndex) * estimatedRowHeight,
+    );
+
+    return {
+      visibleMessages,
+      topSpacerHeight,
+      bottomSpacerHeight,
+    };
+  }, [
+    chatScrollTop,
+    chatViewportHeight,
+    estimatedRowHeight,
+    filteredMessages,
+  ]);
 
   // Auto-selection
   useEffect(() => {
@@ -899,12 +497,13 @@ export default function DashboardPage() {
 
     prevSuperChatCountRef.current = superChats.length;
     prevMemberCountRef.current = newMembers.length;
-  }, [superChats.length, newMembers.length, settings.autoSelectSuperChats, settings.autoSelectMembers, handleSelect, messages.length]);
+  }, [messages.length, newMembers, settings.autoSelectMembers, settings.autoSelectSuperChats, superChats, handleSelect]);
 
   // Initial scroll to bottom when messages first load
   useEffect(() => {
     if (filteredMessages.length > 0 && chatListRef.current && prevMessageCountRef.current === 0) {
       chatListRef.current.scrollTop = chatListRef.current.scrollHeight;
+      setChatScrollTop(chatListRef.current.scrollTop);
       prevMessageCountRef.current = filteredMessages.length;
     }
   }, [filteredMessages.length]);
@@ -919,6 +518,7 @@ export default function DashboardPage() {
         requestAnimationFrame(() => {
           if (chatListRef.current) {
             chatListRef.current.scrollTop = chatListRef.current.scrollHeight;
+            setChatScrollTop(chatListRef.current.scrollTop);
             setTimeout(() => { isAutoScrolling.current = false; }, 100);
           }
         });
@@ -932,6 +532,7 @@ export default function DashboardPage() {
   const handleScroll = useCallback(() => {
     if (!chatListRef.current || isAutoScrolling.current) return;
     const { scrollTop, scrollHeight, clientHeight } = chatListRef.current;
+    setChatScrollTop(scrollTop);
 
     // Check distance from bottom with higher tolerance (50px)
     const isAtBottom = scrollHeight - scrollTop - clientHeight < 50;
@@ -955,6 +556,7 @@ export default function DashboardPage() {
     if (chatListRef.current) {
       isAutoScrolling.current = true;
       chatListRef.current.scrollTop = chatListRef.current.scrollHeight;
+      setChatScrollTop(chatListRef.current.scrollTop);
       setAutoScroll(true);
       setTimeout(() => { isAutoScrolling.current = false; }, 100);
     }
@@ -978,6 +580,30 @@ export default function DashboardPage() {
     }
   }, [contextMenu, closeContextMenu]);
 
+  useEffect(() => {
+    const node = chatListRef.current;
+    if (!node) {
+      return;
+    }
+
+    const updateViewport = () => {
+      setChatViewportHeight(node.clientHeight);
+      setChatScrollTop(node.scrollTop);
+    };
+
+    updateViewport();
+
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateViewport);
+      return () => window.removeEventListener('resize', updateViewport);
+    }
+
+    const observer = new ResizeObserver(() => updateViewport());
+    observer.observe(node);
+
+    return () => observer.disconnect();
+  }, [backendAvailable, filteredMessages.length]);
+
   return (
     <div className="app-container bg-app-bg">
       <TopBar
@@ -987,113 +613,64 @@ export default function DashboardPage() {
         streamInput={streamInput}
         onStreamInputChange={setStreamInput}
         onConnect={handleConnect}
-        onDisconnect={disconnect}
-        stats={{
-          messages: regularMessages.length,
-          superChats: superChats.length,
-          members: newMembers.length
-        }}
+        onDisconnect={handleDisconnect}
+        savedChannels={savedChannels}
+        onSaveChannel={handleSaveChannel}
+        onRemoveChannel={handleRemoveChannel}
+        onSelectChannel={handleSelectChannel}
       />
 
       <div
-        className="relative flex-1 overflow-auto"
-        style={{
-          background: settings.showAmbientGlow
-            ? 'radial-gradient(circle at top left, var(--accent-glow), transparent 26%), radial-gradient(circle at bottom right, rgba(56,189,248,0.12), transparent 28%), var(--bg)'
-            : 'var(--bg)',
-        }}
+        className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
+        style={{ background: 'var(--bg)' }}
       >
-        <div className="px-4 py-4 xl:px-6">
+        <DashboardStats metrics={metrics} />
+
+        <div className="flex min-h-0 flex-1 flex-col px-4 py-4 xl:px-6">
           <div
-            className={`mx-auto flex min-h-full w-full flex-col gap-4 ${
+            className={`mx-auto flex h-full min-h-0 w-full flex-col gap-4 ${
               settings.workspaceFrame === 'framed' ? 'max-w-[1600px]' : 'max-w-none'
             }`}
           >
-            <section className="grid gap-3 xl:grid-cols-3">
-              <MetricCard
-                label="Visible Feed"
-                value={String(filteredMessages.length)}
-                hint={
-                  userFilter
-                    ? `Filtered to @${userFilter}`
-                    : deferredSearchQuery
-                      ? `Search: ${deferredSearchQuery}`
-                      : 'Operator moderation queue'
-                }
-                toneClass="text-sky-200"
-              />
-              <MetricCard
-                label="Active Authors"
-                value={String(uniqueAuthors)}
-                hint={
-                  regularMessages.length > 0
-                    ? 'Unique chatters in the current buffer'
-                    : connected
-                      ? 'Unique chatters in current session'
-                      : 'Connect to a live stream to populate'
-                }
-                toneClass="text-emerald-200"
-              />
-              <MetricCard
-                label="Overlay Output"
-                value={selection ? getMessageKind(selection) : 'Idle'}
-                hint={
-                  selection
-                    ? `Pinned from @${selection.author}`
-                    : railSpecialCount > 0
-                      ? `${railSpecialCount} highlight items waiting in rail`
-                      : 'Nothing pinned yet'
-                }
-                toneClass="text-amber-200"
-              />
-            </section>
-
             <div
-              className="grid min-h-0 gap-4 lg:grid-cols-[minmax(0,1fr)_var(--dashboard-rail-width)]"
+              className="flex-1 grid min-h-0 gap-4 lg:grid-cols-[minmax(0,1fr)_var(--dashboard-rail-width)]"
               style={dashboardShellStyle}
             >
-              <section className="flex min-h-[720px] flex-col overflow-hidden rounded-[30px] border border-white/8 bg-[linear-gradient(180deg,rgba(18,19,26,0.92),rgba(11,12,18,0.98))] shadow-[0_28px_70px_rgba(0,0,0,0.42)] backdrop-blur">
-                <div className="border-b border-white/6 px-5 py-5">
-                  <div className="flex flex-wrap items-start gap-3">
-                    <div>
-                      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-app-text-subtle">
-                        Live Feed
-                      </div>
-                      <h2 className="mt-2 text-[28px] font-semibold tracking-[-0.04em] text-app-text">
-                        Broadcast Command Deck
-                      </h2>
-                      <p className="mt-1 text-sm text-app-text-muted">
-                        Search, inspect, and route messages to the overlay without leaving the desk.
-                      </p>
+              <section className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-white/6 bg-surface-2">
+                <div className="border-b border-white/6 px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2">
+                      <span className={`h-1.5 w-1.5 rounded-full ${autoScroll ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+                      <h2 className="text-sm font-semibold text-app-text">Live Chat</h2>
                     </div>
+                    <span className="text-xs text-app-text-subtle">{filteredMessages.length}</span>
+                    {userFilter ? (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-app-accent/10 px-2 py-0.5 text-[11px] text-app-accent">
+                        @{userFilter}
+                        <button type="button" className="opacity-60 hover:opacity-100" onClick={() => setUserFilter(null)}>✕</button>
+                      </span>
+                    ) : null}
                     <div className="flex-1" />
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded-full border border-white/8 bg-white/5 px-3 py-1 text-xs font-semibold text-app-text-secondary">
-                        {autoScroll ? 'Live follow on' : 'Manual review'}
+                    {selection ? (
+                      <span className="flex items-center gap-1 rounded-full border border-app-accent/20 bg-app-accent/8 px-2 py-0.5 text-[11px] text-app-accent">
+                        <span className="h-1 w-1 rounded-full bg-app-accent" />
+                        Pinned
                       </span>
-                      <span className="rounded-full border border-white/8 bg-white/5 px-3 py-1 text-xs font-semibold text-app-text-secondary">
-                        Density: {settings.dashboardDensity}
-                      </span>
-                      {selection ? (
-                        <span className="rounded-full border border-app-accent/20 bg-app-accent/10 px-3 py-1 text-xs font-semibold text-app-accent">
-                          Pinned: {getMessageKind(selection)}
-                        </span>
-                      ) : null}
-                      {selection && !settings.showSelectionPreview ? (
-                        <button
-                          type="button"
-                          className="rounded-full border border-white/8 bg-white/5 px-3 py-1 text-xs font-semibold text-app-text-secondary transition hover:border-app-accent/30 hover:bg-app-accent/10 hover:text-app-text"
-                          onClick={handleClearSelection}
-                        >
-                          Clear selection
-                        </button>
-                      ) : null}
-                    </div>
+                    ) : null}
+                    {selection && !settings.showSelectionPreview ? (
+                      <button
+                        type="button"
+                        className="rounded-md border border-white/8 bg-white/5 px-2 py-0.5 text-[11px] text-app-text-muted transition hover:bg-white/10 hover:text-app-text"
+                        onClick={handleClearSelection}
+                      >
+                        Kaldır
+                      </button>
+                    ) : null}
                   </div>
 
-                  <div className="mt-5 flex flex-col gap-3 xl:flex-row xl:items-center">
+                  <div className="mt-3 flex flex-col gap-2 xl:flex-row xl:items-center">
                     <label className="relative flex-1">
-                      <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-sm text-app-text-subtle">
+                      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs text-app-text-subtle">
                         ⌕
                       </span>
                       <input
@@ -1101,17 +678,17 @@ export default function DashboardPage() {
                         value={searchQuery}
                         onChange={(event) => setSearchQuery(event.target.value)}
                         placeholder="Search author, text, or emoji alt text"
-                        className="h-12 w-full rounded-2xl border border-white/8 bg-black/20 pl-11 pr-4 text-sm text-app-text outline-none transition focus:border-app-accent/40 focus:bg-black/30 focus:ring-2 focus:ring-app-accent/15"
+                        className="h-9 w-full rounded-md border border-white/8 bg-surface-3 pl-8 pr-3 text-sm text-app-text outline-none transition focus:border-app-accent/40 focus:ring-1 focus:ring-app-accent/20"
                       />
                     </label>
 
-                    <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-1.5">
                       {userFilter ? (
-                        <span className="inline-flex items-center gap-2 rounded-full border border-app-accent/20 bg-app-accent/10 px-3 py-2 text-xs font-semibold text-app-accent">
+                        <span className="inline-flex items-center gap-1.5 rounded-md bg-app-accent/10 px-2 py-1 text-[11px] text-app-accent">
                           <span>@{userFilter}</span>
                           <button
                             type="button"
-                            className="grid h-5 w-5 place-items-center rounded-full bg-white/10 text-[10px] text-white transition hover:bg-white/20"
+                            className="text-[10px] opacity-60 transition hover:opacity-100"
                             onClick={() => setUserFilter(null)}
                             title="Clear author filter"
                           >
@@ -1122,10 +699,10 @@ export default function DashboardPage() {
                       {deferredSearchQuery ? (
                         <button
                           type="button"
-                          className="rounded-full border border-white/8 bg-white/5 px-3 py-2 text-xs font-semibold text-app-text-secondary transition hover:border-white/12 hover:bg-white/8"
+                          className="rounded-md bg-white/5 px-2 py-1 text-[11px] text-app-text-muted transition hover:bg-white/10"
                           onClick={() => setSearchQuery('')}
                         >
-                          Clear search
+                          Clear
                         </button>
                       ) : null}
                     </div>
@@ -1133,7 +710,7 @@ export default function DashboardPage() {
                 </div>
 
                 {filteredMessages.length === 0 ? (
-                  <EmptyState
+                  <EmptyStateCard
                     icon="💬"
                     title={
                       deferredSearchQuery
@@ -1157,11 +734,14 @@ export default function DashboardPage() {
                 ) : (
                   <div className="relative flex min-h-0 flex-1 flex-col">
                     <div
-                      className="flex-1 space-y-3 overflow-y-auto px-5 py-4"
+                      className="flex-1 overflow-y-auto px-3 py-2"
                       ref={chatListRef}
                       onScroll={handleScroll}
                     >
-                      {filteredMessages.map((msg) => (
+                      {virtualizedFeed.topSpacerHeight > 0 ? (
+                        <div style={{ height: `${virtualizedFeed.topSpacerHeight}px` }} />
+                      ) : null}
+                      {virtualizedFeed.visibleMessages.map((msg) => (
                         <MessageRow
                           key={msg.id}
                           message={msg}
@@ -1176,49 +756,46 @@ export default function DashboardPage() {
                           showTimestamps={settings.showTimestamps}
                         />
                       ))}
+                      {virtualizedFeed.bottomSpacerHeight > 0 ? (
+                        <div style={{ height: `${virtualizedFeed.bottomSpacerHeight}px` }} />
+                      ) : null}
                     </div>
                     {!autoScroll && (
                       <button
-                        className="absolute bottom-5 left-1/2 inline-flex -translate-x-1/2 items-center gap-2 rounded-full bg-app-accent px-4 py-2 text-xs font-semibold text-white shadow-panel transition hover:bg-app-accent-hover"
+                        className="absolute bottom-3 left-1/2 inline-flex -translate-x-1/2 items-center gap-1.5 rounded-md bg-surface-3 px-3 py-1.5 text-xs text-app-text-secondary shadow-md transition hover:bg-surface-4"
                         onClick={scrollToBottom}
                       >
                         <span>↓</span>
-                        <span>Jump to live edge</span>
+                        <span>Jump to live</span>
                       </button>
                     )}
                   </div>
                 )}
               </section>
 
-              <aside className="flex min-h-0 flex-col gap-4">
-                {settings.showSelectionPreview ? (
-                  <SelectionPreviewCard
-                    selection={selection}
-                    densityStyles={densityStyles}
-                    showAvatars={settings.showAvatars}
-                    showBadges={settings.showBadges}
-                    showTimestamps={settings.showTimestamps}
-                    onClear={handleClearSelection}
-                  />
-                ) : null}
+              <aside className="relative min-h-0 flex-1">
+                {settings.showSelectionPreview && (
+                  <DraggableCard id="selection-preview">
+                    <SelectionPreviewCard
+                      selection={selection}
+                      settings={settings}
+                      onClear={handleClearSelection}
+                    />
+                  </DraggableCard>
+                )}
 
-                <div className="grid min-h-0 flex-1 gap-4 md:grid-cols-2 lg:grid-cols-1">
-                  <section className="flex min-h-0 flex-col overflow-hidden rounded-[28px] border border-white/8 bg-[linear-gradient(180deg,rgba(27,21,11,0.9),rgba(19,14,8,0.97))] shadow-panel-lg backdrop-blur">
-                    <div className="flex items-center gap-3 border-b border-white/6 px-5 py-4">
-                      <div>
-                        <span className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-100/80">
-                          Revenue
-                        </span>
-                        <h3 className="mt-1 text-base font-semibold text-app-text">Super Chats</h3>
-                      </div>
+                <DraggableCard id="superchat-panel">
+                  <div className="flex flex-col h-full">
+                    <div className="flex items-center gap-2 border-b border-white/6 px-4 py-3 flex-shrink-0">
+                      <h3 className="text-sm font-semibold text-app-text">Super Chats</h3>
                       <div className="flex-1" />
-                      <span className="rounded-full border border-amber-300/20 bg-amber-300/10 px-3 py-1 text-xs font-semibold text-amber-100">
+                      <span className="rounded-md bg-amber-400/10 px-2 py-0.5 text-[11px] font-medium text-amber-200">
                         {superChats.length}
                       </span>
                     </div>
-                    <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
+                    <div className="flex-1 space-y-1 overflow-y-auto px-2 py-2">
                       {superChats.length === 0 ? (
-                        <EmptyState
+                        <EmptyStateCard
                           icon="💎"
                           title="No super chats yet"
                           description="When someone sends a super chat, it will appear here."
@@ -1231,52 +808,47 @@ export default function DashboardPage() {
                             message={msg}
                             isSelected={selection?.id === msg.id}
                             onSelect={() => handleSelect(msg)}
-                            densityStyles={densityStyles}
                             showAvatars={settings.showAvatars}
                             showTimestamps={settings.showTimestamps}
                           />
                         ))
                       )}
                     </div>
-                  </section>
+                  </div>
+                </DraggableCard>
 
-                  <section className="flex min-h-0 flex-col overflow-hidden rounded-[28px] border border-white/8 bg-[linear-gradient(180deg,rgba(10,28,22,0.92),rgba(8,17,13,0.98))] shadow-panel-lg backdrop-blur">
-                    <div className="flex items-center gap-3 border-b border-white/6 px-5 py-4">
-                      <div>
-                        <span className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-100/80">
-                          Community
-                        </span>
-                        <h3 className="mt-1 text-base font-semibold text-app-text">New Members</h3>
-                      </div>
+                <DraggableCard id="members-panel">
+                  <div className="flex flex-col h-full">
+                    <div className="flex items-center gap-2 border-b border-white/6 px-4 py-3 flex-shrink-0">
+                      <h3 className="text-sm font-semibold text-app-text">New Members</h3>
                       <div className="flex-1" />
-                      <span className="rounded-full border border-emerald-300/20 bg-emerald-300/10 px-3 py-1 text-xs font-semibold text-emerald-100">
+                      <span className="rounded-md bg-emerald-400/10 px-2 py-0.5 text-[11px] font-medium text-emerald-200">
                         {newMembers.length}
                       </span>
                     </div>
-                    <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
+                    <div className="flex-1 space-y-1 overflow-y-auto px-2 py-2">
                       {newMembers.length === 0 ? (
-                        <EmptyState
+                        <EmptyStateCard
                           icon="⭐"
                           title="No new members yet"
                           description="New channel members will appear here when they join."
                           small
                         />
                       ) : (
-                        newMembers.map((msg) => (
+                        newMembers.map((msg, idx) => (
                           <MemberItem
-                            key={msg.id}
+                            key={`${msg.id}-${idx}`}
                             message={msg}
                             isSelected={selection?.id === msg.id}
                             onSelect={() => handleSelect(msg)}
-                            densityStyles={densityStyles}
                             showAvatars={settings.showAvatars}
                             showTimestamps={settings.showTimestamps}
                           />
                         ))
                       )}
                     </div>
-                  </section>
-                </div>
+                  </div>
+                </DraggableCard>
               </aside>
             </div>
           </div>
@@ -1295,7 +867,7 @@ export default function DashboardPage() {
             onClick={() => { setUserFilter(contextMenu.message.author); closeContextMenu(); }}
           >
             <span>👤</span>
-            <span>Show {contextMenu.message.author}'s messages</span>
+            <span>Show {contextMenu.message.author}&apos;s messages</span>
           </button>
           <button
             className="context-menu__item"

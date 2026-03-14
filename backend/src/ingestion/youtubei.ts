@@ -1,4 +1,5 @@
-import type { ChatMessage, Badge, SuperChatInfo, Poll } from '@shared/chat';
+import type { ChatMessage, Badge, SuperChatInfo, Poll } from '../../../shared/chat';
+import { extractChannelHandleFromUrl, normalizeChannelHandle } from '../../../shared/channel';
 import EventEmitter from 'eventemitter3';
 import Innertube, { UniversalCache } from 'youtubei.js';
 
@@ -7,6 +8,15 @@ export type IngestionContext = {
   liveChat: any;
   videoId: string;
   emitter: ChatEventEmitter;
+};
+
+export type ChannelLiveStatus = {
+  channelId?: string;
+  name: string;
+  handle: string;
+  avatarUrl?: string;
+  isLive: boolean;
+  liveId?: string;
 };
 
 export type ContinuationState = {
@@ -22,13 +32,59 @@ export type ChatEventEmitter = EventEmitter<{
 }>;
 
 const defaultTimeout = 1500;
+const REQUEST_TIMEOUT_MS = 10_000;
+const SEEN_ID_TTL_MS = 60 * 60 * 1000;
+const SEEN_ID_MAX_SIZE = 20_000;
+let discoveryClientPromise: Promise<Innertube> | null = null;
 
 // Track message IDs to ensure uniqueness
-const seenIds = new Map<string, number>();
+const seenIds = new Map<string, { count: number; lastSeenAt: number }>();
+
+let lastTtlCleanup = 0;
+
+function cleanupSeenIds(now = Date.now()) {
+  // 1. Throttle O(N) TTL cleanup to once every 10 seconds max
+  if (now - lastTtlCleanup > 10000) {
+    for (const [key, value] of seenIds.entries()) {
+      if (now - value.lastSeenAt > SEEN_ID_TTL_MS) {
+        seenIds.delete(key);
+      }
+    }
+    lastTtlCleanup = now;
+  }
+
+  // 2. If still too big, delete from the START (oldest) until we hit the target size
+  if (seenIds.size > SEEN_ID_MAX_SIZE) {
+    const keys = seenIds.keys();
+    let toDelete = seenIds.size - SEEN_ID_MAX_SIZE;
+    while (toDelete > 0) {
+      const next = keys.next();
+      if (next.done) break;
+      seenIds.delete(next.value);
+      toDelete--;
+    }
+  }
+}
 
 function generateUniqueId(baseId: string): string {
-  const count = seenIds.get(baseId) ?? 0;
-  seenIds.set(baseId, count + 1);
+  const now = Date.now();
+  const existing = seenIds.get(baseId);
+  const count = existing?.count ?? 0;
+
+  seenIds.set(baseId, {
+    count: count + 1,
+    lastSeenAt: now,
+  });
+
+  // Re-inserting the key moves it to the end of the Map (most recent)
+  // This ensures that the insertion-order cleanup works correctly even for repeated IDs
+  const val = seenIds.get(baseId)!;
+  seenIds.delete(baseId);
+  seenIds.set(baseId, val);
+
+  if (seenIds.size > SEEN_ID_MAX_SIZE) {
+    cleanupSeenIds(now);
+  }
 
   // If this is the first occurrence of this ID, return it as-is
   if (count === 0) {
@@ -58,6 +114,24 @@ function resolveMessageRuns(item: any) {
   return runs;
 }
 
+async function withTimeout<T>(label: string, task: Promise<T>, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
+  let timeoutId: NodeJS.Timeout | null = null;
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([task, timeoutPromise]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
 export async function bootstrapInnertube(videoId: string): Promise<IngestionContext> {
   if (!videoId) {
     throw new Error('YOUTUBE_LIVE_ID is required to bootstrap Innertube');
@@ -69,7 +143,7 @@ export async function bootstrapInnertube(videoId: string): Promise<IngestionCont
   });
 
   console.log('[Ingestion] Fetching video info...');
-  const info = await client.getInfo(videoId);
+  const info = await withTimeout('Innertube getInfo', client.getInfo(videoId));
 
   console.log('[Ingestion] Getting live chat...');
   const liveChat = info.getLiveChat();
@@ -79,6 +153,28 @@ export async function bootstrapInnertube(videoId: string): Promise<IngestionCont
   }
 
   const emitter: ChatEventEmitter = new EventEmitter();
+
+  const emitNormalizedAction = (action: any) => {
+    const normalized = normalizeAction(action);
+    if (normalized) {
+      emitter.emit('message', normalized);
+    } else if (process.env.DEBUG_CHAT_ACTIONS === '1') {
+      console.warn('[Ingestion] Unhandled chat action', {
+        actionType: action?.type,
+        itemType: action?.item?.type,
+        targetItemType: action?.target_item?.type,
+        hasItem: !!action?.item,
+        hasTargetItem: !!action?.target_item
+      });
+    }
+  };
+
+  liveChat.on('start', (contents: any) => {
+    const initialActions = Array.isArray(contents?.actions) ? contents.actions : [];
+    for (const action of initialActions) {
+      emitNormalizedAction(action);
+    }
+  });
 
   liveChat.on('chat-update', (action: any) => {
     // Handle poll updates (just detect active/closed state)
@@ -96,10 +192,7 @@ export async function bootstrapInnertube(videoId: string): Promise<IngestionCont
       return;
     }
 
-    const normalized = normalizeAction(action);
-    if (normalized) {
-      emitter.emit('message', normalized);
-    }
+    emitNormalizedAction(action);
   });
 
   liveChat.on('error', (err: unknown) => {
@@ -127,34 +220,76 @@ export async function bootstrapInnertube(videoId: string): Promise<IngestionCont
   };
 }
 
-export async function fetchChatBatch(
-  ctx: IngestionContext,
-  options?: { windowMs?: number }
-): Promise<ContinuationState> {
-  const windowMs = options?.windowMs ?? defaultTimeout;
-  const collected: ChatMessage[] = [];
+export async function resolveChannelLiveStatus(input: string): Promise<ChannelLiveStatus> {
+  const normalizedHandle = normalizeChannelHandle(input);
 
-  const listener = (message: ChatMessage) => {
-    collected.push(message);
+  if (!normalizedHandle) {
+    throw new Error('A YouTube channel handle is required');
+  }
+
+  const client = await getDiscoveryClient();
+  const search = await withTimeout(
+    'Innertube channel search',
+    client.search(`@${normalizedHandle}`, { type: 'channel' }),
+  );
+  const channelResult = pickBestChannelResult(search?.results, normalizedHandle);
+
+  if (!channelResult?.id) {
+    throw new Error(`Channel not found for handle "${normalizedHandle}"`);
+  }
+
+  const channel = await withTimeout(
+    'Innertube getChannel',
+    client.getChannel(channelResult.id),
+  );
+  const canonicalHandle =
+    extractChannelHandleFromUrl(channel.metadata?.vanity_channel_url) ||
+    extractChannelHandleFromUrl(channelResult?.endpoint?.payload?.canonicalBaseUrl) ||
+    normalizedHandle;
+
+  const status: ChannelLiveStatus = {
+    channelId: String(channelResult.id),
+    name:
+      channel.metadata?.title ||
+      channelResult.author?.name ||
+      canonicalHandle,
+    handle: canonicalHandle,
+    avatarUrl:
+      channel.metadata?.avatar?.[0]?.url ??
+      channel.metadata?.thumbnail?.[0]?.url,
+    isLive: false
   };
 
-  ctx.emitter.on('message', listener);
+  if (!channel.has_live_streams) {
+    return status;
+  }
 
-  await delay(windowMs);
+  const liveTab = await withTimeout(
+    'Innertube getLiveStreams',
+    channel.getLiveStreams(),
+  );
+  const richItems = (liveTab.current_tab?.content as any)?.contents;
 
-  ctx.emitter.off('message', listener);
+  if (!Array.isArray(richItems)) {
+    return status;
+  }
 
-  const timeoutMs = ctx.liveChat?.continuation?.timeout_ms;
-  const validTimeout = typeof timeoutMs === 'number' && !isNaN(timeoutMs) && timeoutMs > 0
-    ? timeoutMs
-    : defaultTimeout;
+  for (const richItem of richItems) {
+    const video = richItem?.content;
 
-  return {
-    messages: collected,
-    nextToken: ctx.liveChat?.continuation?.token ?? null,
-    timeoutMs: validTimeout
-  };
+    if (!video?.video_id || !video.is_live) {
+      continue;
+    }
+
+    status.isLive = true;
+    status.liveId = String(video.video_id);
+    break;
+  }
+
+  return status;
 }
+
+
 
 function resolveMessageText(item: any): string {
   if (!item?.message) return '';
@@ -183,6 +318,32 @@ function resolveMessageText(item: any): string {
   }
 
   return '';
+}
+
+async function getDiscoveryClient(): Promise<Innertube> {
+  if (!discoveryClientPromise) {
+    discoveryClientPromise = Innertube.create({
+      cache: new UniversalCache(false)
+    }).catch((error) => {
+      discoveryClientPromise = null;
+      throw error;
+    });
+  }
+
+  return discoveryClientPromise;
+}
+
+function pickBestChannelResult(results: any[] | undefined, normalizedHandle: string) {
+  if (!Array.isArray(results) || results.length === 0) {
+    return null;
+  }
+
+  const expectedHandle = normalizedHandle.toLowerCase();
+
+  return results.find((result) => {
+    const canonical = extractChannelHandleFromUrl(result?.endpoint?.payload?.canonicalBaseUrl);
+    return canonical.toLowerCase() === expectedHandle;
+  }) ?? results[0];
 }
 
 function resolveTimestamp(timestamp: number | string | undefined): string {
@@ -281,6 +442,8 @@ function extractLeaderboardRank(item: any): number | undefined {
   return undefined;
 }
 
+const CURRENCY_MATCH_REGEX = /([\$\€\£\¥\₹\₺]|[A-Z]{2,3})?\s*([\d,\.]+)\s*([\$\€\£\¥\₹\₺]|[A-Z]{2,3})?/;
+
 function extractSuperChatInfo(item: any): SuperChatInfo | undefined {
   const superTypes = new Set([
     'LiveChatPaidMessage',
@@ -327,7 +490,7 @@ function extractSuperChatInfo(item: any): SuperChatInfo | undefined {
   if (amountText) {
     // Regex to capture currency symbol/code and amount
     // Handles: $5.00, €5,00, 5,00 €, 5.00 USD, TRY5.00, TRY 55, etc.
-    const match = amountText.match(/([\$\€\£\¥\₹\₺]|[A-Z]{2,3})?\s*([\d,\.]+)\s*([\$\€\£\¥\₹\₺]|[A-Z]{2,3})?/);
+    const match = amountText.match(CURRENCY_MATCH_REGEX);
     if (match) {
       // Prefer currency symbol/code before the number, fallback to after
       currency = match[1] || match[3] || '';

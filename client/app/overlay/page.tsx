@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import type { ChatMessage } from '@shared/chat';
 import { DEFAULT_APP_SETTINGS, type AppSettings } from '@shared/settings';
 import { proxyImageUrl } from '../../lib/imageProxy';
@@ -13,6 +14,7 @@ import {
 } from '../../lib/appSettings';
 import { applyAppTheme } from '../../lib/appTheme';
 import { BACKEND_URL } from '../../lib/runtime';
+import { OverlayCard } from '../components/OverlayCard';
 
 type SelectionPayload = {
   message: (ChatMessage & { timestamp?: string | number | Date }) | null;
@@ -20,12 +22,8 @@ type SelectionPayload = {
 
 export default function OverlayPage() {
   const [message, setMessage] = useState<(ChatMessage & { timestamp?: string | number | Date }) | null>(null);
-  const [displayMessage, setDisplayMessage] = useState<(ChatMessage & { timestamp?: string | number | Date }) | null>(null);
   const [connected, setConnected] = useState(false);
-  const [fadingOut, setFadingOut] = useState(false);
-  const [switching, setSwitching] = useState(false);
   const connectionRef = useRef<EventSource | null>(null);
-  const switchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Expanded Settings State
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
@@ -96,44 +94,8 @@ export default function OverlayPage() {
       source.removeEventListener('settings', onSettingsUpdate as EventListener);
       source.close();
       connectionRef.current = null;
-      if (switchTimeoutRef.current) {
-        clearTimeout(switchTimeoutRef.current);
-      }
     };
   }, []); // Empty dependency array - only connect once
-
-  // Handle message transitions
-  useEffect(() => {
-    // Clear any pending timeout
-    if (switchTimeoutRef.current) {
-      clearTimeout(switchTimeoutRef.current);
-      switchTimeoutRef.current = null;
-    }
-
-    if (message === null && displayMessage !== null) {
-      // Deselecting - fade out
-      setFadingOut(true);
-      setSwitching(false);
-      switchTimeoutRef.current = setTimeout(() => {
-        setDisplayMessage(null);
-        setFadingOut(false);
-      }, 300);
-    } else if (message !== null && displayMessage !== null && message.id !== displayMessage.id) {
-      // Switching between messages - fade out then fade in
-      setSwitching(true);
-      setFadingOut(true);
-      switchTimeoutRef.current = setTimeout(() => {
-        setDisplayMessage(message);
-        setFadingOut(false);
-        setSwitching(false);
-      }, 300);
-    } else if (message !== null && displayMessage === null) {
-      // First message - just show it
-      setDisplayMessage(message);
-      setFadingOut(false);
-      setSwitching(false);
-    }
-  }, [message, displayMessage]);
 
   useEffect(() => {
     const initial = loadStoredSettings();
@@ -151,20 +113,20 @@ export default function OverlayPage() {
   }, [settings]);
 
   // Helper to determine message type
-  const isMemberEvent = displayMessage && (
-    displayMessage.membershipGift ||
-    displayMessage.membershipGiftPurchase
+  const isMemberEvent = message && (
+    message.membershipGift ||
+    message.membershipGiftPurchase
   );
 
-  const isMemberMsg = displayMessage && (
+  const isMemberMsg = message && (
     isMemberEvent ||
-    displayMessage.isMember ||
-    displayMessage.membershipLevel
+    message.isMember ||
+    message.membershipLevel
   );
 
-  const isSuperChatMsg = displayMessage && (
-    displayMessage.superChat ||
-    (displayMessage as any).superSticker
+  const isSuperChatMsg = message && (
+    message.superChat ||
+    (message as any).superSticker
   );
 
 
@@ -186,7 +148,6 @@ export default function OverlayPage() {
       transform: `scale(${scale})`,
       transformOrigin: 'bottom left', // Default
       margin: '20px',
-      transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
     };
 
     switch (position) {
@@ -223,32 +184,6 @@ export default function OverlayPage() {
     return baseStyle;
   };
 
-  // Dynamic Styles Logic
-  const useMemberStyling = isMemberMsg && (isMemberEvent || settings.useSpecialMemberStyling !== false);
-
-  const dynamicBgColor = useMemberStyling
-    ? ((settings.membersGradientColor1 && settings.membersGradientColor2) ? undefined : (settings.membersOverlayBgColor || settings.overlayBgColor))
-    : isSuperChatMsg
-      ? (settings.superChatOverlayBgColor || settings.overlayBgColor)
-      : settings.overlayBgColor;
-
-  const dynamicGradient = useMemberStyling && settings.membersGradientColor1 && settings.membersGradientColor2
-    ? `linear-gradient(90deg, ${settings.membersGradientColor1}, ${settings.membersGradientColor2})`
-    : undefined;
-
-  const dynamicTxColor = useMemberStyling
-    ? (settings.membersOverlayTxColor || settings.overlayTxColor)
-    : isSuperChatMsg
-      ? (settings.superChatOverlayTxColor || settings.overlayTxColor)
-      : settings.overlayTxColor;
-
-  const dynamicFontSize = useMemberStyling
-    ? (settings.membersFontSize || settings.messageFontSize || 14)
-    : isSuperChatMsg
-      ? (settings.superChatFontSize || settings.messageFontSize || 14)
-      : (settings.messageFontSize || 14);
-
-
   return (
     <main className="overlay">
       <style>{'html, body { background: transparent !important; overflow: hidden; }'}</style>
@@ -256,103 +191,20 @@ export default function OverlayPage() {
       {isMemberMsg && settings.membersCss && <style>{settings.membersCss}</style>}
       {isSuperChatMsg && settings.superChatCss && <style>{settings.superChatCss}</style>}
 
-      {displayMessage && (
-        <div
-          className={`overlay__card ${fadingOut ? 'overlay__card--fadeOut' : ''} ${isMemberMsg ? 'overlay__card--member-only' : ''} ${isSuperChatMsg ? 'overlay__card--superchat-only' : ''}`}
-          style={{
-            ...getPositionStyle(),
-            maxWidth: `${settings.messageMaxWidth}px`,
-            width: '100%',
-            backgroundColor: dynamicBgColor,
-            background: dynamicGradient,
-            color: dynamicTxColor
-          }}
-        >
-          {/* Header Area */}
-          {displayMessage.superChat ? (
-            <div className="overlay__superchat-header" style={{ backgroundColor: settings.superChatHeaderColor || displayMessage.superChat.color }}>
-              {displayMessage.authorPhoto && settings.showAvatars !== false && (
-                <img src={proxyImageUrl(displayMessage.authorPhoto)} alt="" className="overlay__superchat-avatar" />
-              )}
-              <div className="overlay__superchat-info">
-                <span className="overlay__superchat-name">{displayMessage.author}</span>
-                <span className="overlay__superchat-amount">{displayMessage.superChat.amount}</span>
-              </div>
-            </div>
-          ) : isMemberEvent ? (
-            <div className="overlay__membership-header">
-              {displayMessage.authorPhoto && settings.showAvatars !== false && (
-                <img src={proxyImageUrl(displayMessage.authorPhoto)} alt="" className="overlay__membership-avatar" />
-              )}
-              <div className="overlay__membership-info">
-                <span className="overlay__membership-name">{displayMessage.author}</span>
-                <span className="overlay__membership-level">
-                  {displayMessage.membershipGiftPurchase && displayMessage.giftCount
-                    ? `Sent ${displayMessage.giftCount} Gift Membership${displayMessage.giftCount > 1 ? 's' : ''}`
-                    : displayMessage.membershipLevel || 'Member'}
-                </span>
-              </div>
-            </div>
-          ) : (
-            // Normal Header (including regular messages from Members)
-            <div className="overlay__header">
-              {displayMessage.authorPhoto && settings.showAvatars !== false && (
-                <img src={proxyImageUrl(displayMessage.authorPhoto)} alt="" className="overlay__avatar" />
-              )}
-              <div className="overlay__meta">
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span className="overlay__author" style={{ color: dynamicTxColor }}>{displayMessage.author}</span>
-                  {isMemberMsg && (
-                    <span style={{
-                      fontSize: '12px',
-                      fontWeight: 700,
-                      color: '#10b981',
-                      background: 'rgba(16, 185, 129, 0.15)',
-                      padding: '2px 6px',
-                      borderRadius: '4px',
-                      textTransform: 'uppercase'
-                    }}>Member</span>
-                  )}
-                </div>
-                {settings.showTimestamps && displayMessage.timestamp && (
-                  <span className="overlay__time" style={{ color: dynamicTxColor, opacity: 0.7 }}>
-                    {new Date(displayMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Body */}
-          <div className="overlay__content">
-            {displayMessage.runs?.length ? (
-              <p className={isSuperChatMsg ? "overlay__superchat-text" : isMemberMsg ? "overlay__membership-text" : "overlay__text"}
-                style={{ fontSize: `${dynamicFontSize}px`, color: dynamicTxColor }}
-              >
-                {displayMessage.runs.map((r, i) =>
-                  r.emojiUrl ? (
-                    <img key={i} src={proxyImageUrl(r.emojiUrl)} alt={r.emojiAlt || 'emoji'} className="overlay__emoji" style={{ height: `${dynamicFontSize * 1.5}px` }} />
-                  ) : (
-                    <span key={i} style={{ color: dynamicTxColor }}>{r.text}</span>
-                  )
-                )}
-              </p>
-            ) : displayMessage.text && (
-              <p className={isSuperChatMsg ? "overlay__superchat-text" : isMemberMsg ? "overlay__membership-text" : "overlay__text"}
-                style={{ fontSize: `${dynamicFontSize}px`, color: dynamicTxColor }}
-              >
-                {displayMessage.text}
-              </p>
-            )}
-
-            {isSuperChatMsg && displayMessage.superChat?.stickerUrl && (
-              <div className="overlay__sticker">
-                <img src={proxyImageUrl(displayMessage.superChat.stickerUrl)} alt="Sticker" />
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      <AnimatePresence mode="wait">
+        {message && (
+          <motion.div
+            key={message.id}
+            initial={{ opacity: 0, y: 24 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -16, transition: { duration: 0.18 } }}
+            transition={{ type: 'spring', stiffness: 350, damping: 28 }}
+            style={{ ...getPositionStyle() }}
+          >
+            <OverlayCard message={message} settings={settings} />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </main>
   );
 }

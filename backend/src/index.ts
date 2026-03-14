@@ -1,11 +1,16 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import EventEmitter from 'eventemitter3';
-import type { ChatMessage, Poll } from '@shared/chat';
-import type { AppSettings } from '@shared/settings';
-import { bootstrapInnertube, type IngestionContext } from './ingestion/youtubei';
-import { seedMockMessages, trimMessages } from './mockData.js';
-import crypto from 'crypto';
+import { createHash } from 'node:crypto';
+import type { ChatMessage, Poll } from '../../shared/chat';
+import type { AppSettings } from '../../shared/settings';
+import {
+  bootstrapInnertube,
+  resolveChannelLiveStatus,
+  type IngestionContext
+} from './ingestion/youtubei';
+import { trimMessages } from './mockData.js';
+import { saveMessage, getRecentMessages } from './db';
 
 const MAX_MESSAGES = 500;
 const MAX_REGULAR_MESSAGES = 200; // Keep fewer regular messages
@@ -14,6 +19,9 @@ const MAX_REGULAR_MESSAGES = 200; // Keep fewer regular messages
 const imageCache = new Map<string, { buffer: Buffer; contentType: string; timestamp: number }>();
 const CACHE_TTL = 1000 * 60 * 60 * 24; // 24 hours
 const MAX_CACHE_SIZE = 1000; // Maximum number of cached images
+
+// For request coalescing
+const inFlightRequests = new Map<string, Promise<{ buffer: Buffer; contentType: string }>>();
 
 export async function startBackend() {
   const fastify = Fastify({
@@ -36,24 +44,52 @@ export async function startBackend() {
   const overlayEmitter = new EventEmitter<{ update: (message: ChatMessage | null) => void }>();
   const pollEmitter = new EventEmitter<{ update: (poll: Poll | null) => void }>();
   const settingsEmitter = new EventEmitter<{ update: (settings: AppSettings) => void }>();
+  const chatEmitter = new EventEmitter<{ message: (message: ChatMessage) => void }>();
   let currentSettings: AppSettings | null = null;
+
+  const evictOldestCachedImages = (targetSize = MAX_CACHE_SIZE) => {
+    if (imageCache.size <= targetSize) {
+      return;
+    }
+
+    const keys = imageCache.keys();
+    let toDelete = imageCache.size - targetSize;
+    while (toDelete > 0) {
+      const next = keys.next();
+      if (next.done) break;
+      imageCache.delete(next.value);
+      toDelete--;
+    }
+  };
+
+  const touchCachedImage = (key: string, cached: { buffer: Buffer; contentType: string; timestamp: number }) => {
+    const refreshed = {
+      ...cached,
+      timestamp: Date.now(),
+    };
+    imageCache.delete(key);
+    imageCache.set(key, refreshed);
+    return refreshed;
+  };
 
   const rawLiveId = process.env.YOUTUBE_LIVE_ID ?? '';
   const parsedLiveId = extractLiveId(rawLiveId);
-  const shouldMock = !parsedLiveId;
-
   let ingestion: IngestionContext | null = null;
-  let mockInterval: NodeJS.Timeout | null = null;
-
-  if (!shouldMock) {
+  if (parsedLiveId) {
     try {
       console.log(`[Backend] Connecting to YouTube Live ID: ${parsedLiveId}`);
       ingestion = await bootstrapInnertube(parsedLiveId);
       console.log(`[Backend] ✓ YouTube chat connected successfully`);
+      
+      // Load recent history
+      store.push(...getRecentMessages(parsedLiveId, MAX_MESSAGES));
+
       ingestion.emitter.on('message', (message) => {
         store.push(message);
+        saveMessage(parsedLiveId, message);
         // Trim regularly to keep regular messages under control
         trimMessages(store);
+        chatEmitter.emit('message', message);
       });
       ingestion.emitter.on('poll', (poll) => {
         currentPoll = poll;
@@ -63,14 +99,10 @@ export async function startBackend() {
         console.error('[Backend] Innertube ingestion error:', error);
       });
     } catch (error) {
-      console.error('[Backend] Failed to bootstrap Innertube; falling back to mock data:', error);
+      console.error('[Backend] Failed to bootstrap Innertube:', error);
     }
   } else {
-    console.log('[Backend] No YOUTUBE_LIVE_ID found, running in mock mode');
-  }
-
-  if (!ingestion) {
-    mockInterval = seedMockMessages(store, overlayEmitter);
+    console.log('[Backend] No YOUTUBE_LIVE_ID found. Waiting for manual connection.');
   }
 
   fastify.get('/health', async () => ({
@@ -81,6 +113,29 @@ export async function startBackend() {
     connected: !!ingestion,
     liveId: ingestion?.videoId ?? null
   }));
+
+  fastify.get<{ Querystring: { handle?: string } }>('/channels/live-status', async (request, reply) => {
+    const handle = request.query?.handle?.trim();
+
+    if (!handle) {
+      reply.status(400);
+      return { error: 'handle is required' };
+    }
+
+    try {
+      const status = await resolveChannelLiveStatus(handle);
+      return {
+        ...status,
+        checkedAt: Date.now()
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to resolve channel live status';
+      const statusCode = message.toLowerCase().includes('not found') ? 404 : 500;
+
+      reply.status(statusCode);
+      return { error: message };
+    }
+  });
 
   fastify.post<{ Body: { liveId: string } }>('/chat/connect', async (request, reply) => {
     const { liveId } = request.body ?? {};
@@ -93,13 +148,6 @@ export async function startBackend() {
     if (!parsedLiveId) {
       reply.status(400);
       return { error: 'Invalid YouTube Live ID or URL' };
-    }
-
-    // Stop mock messages if running
-    if (mockInterval) {
-      clearInterval(mockInterval);
-      mockInterval = null;
-      console.log('[Backend] Stopped mock messages');
     }
 
     // Stop existing ingestion if any
@@ -120,9 +168,14 @@ export async function startBackend() {
       ingestion = await bootstrapInnertube(parsedLiveId);
       console.log(`[Backend] ✓ YouTube chat connected successfully`);
 
+      // Load recent history for this new liveId
+      store.push(...getRecentMessages(parsedLiveId, MAX_MESSAGES));
+
       ingestion.emitter.on('message', (message) => {
         store.push(message);
+        saveMessage(parsedLiveId, message);
         trimMessages(store);
+        chatEmitter.emit('message', message);
       });
 
       ingestion.emitter.on('poll', (poll) => {
@@ -153,21 +206,52 @@ export async function startBackend() {
       ingestion = null;
     }
 
-    // Start mock messages again
-    if (!mockInterval) {
-      mockInterval = seedMockMessages(store, overlayEmitter);
-      console.log('[Backend] Started mock messages');
-    }
-
     store.length = 0;
     currentSelection = null;
+    currentPoll = null;
     overlayEmitter.emit('update', null);
+    pollEmitter.emit('update', null);
     return { ok: true };
   });
 
   fastify.get('/chat/messages', async () => ({
     messages: store
   }));
+
+  fastify.get('/chat/stream', async (request, reply) => {
+    reply.hijack();
+
+    const res = reply.raw;
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.writeHead(200);
+    res.write(': connected\n\n');
+
+    // Send backlog of existing messages to new client immediately
+    if (store.length > 0) {
+      const backlog = store.slice(-50);
+      res.write(`event: backlog\ndata: ${JSON.stringify({ messages: backlog })}\n\n`);
+    }
+
+    const send = (message: ChatMessage) => {
+      res.write(`event: message\ndata: ${JSON.stringify(message)}\n\n`);
+    };
+
+    const heartbeat = setInterval(() => {
+      res.write('event: heartbeat\ndata: {}\n\n');
+    }, 15000);
+
+    chatEmitter.on('message', send);
+
+    request.raw.on('close', () => {
+      clearInterval(heartbeat);
+      chatEmitter.off('message', send);
+    });
+  });
 
   fastify.get('/poll/current', async () => ({
     poll: currentPoll
@@ -309,57 +393,56 @@ export async function startBackend() {
     }
 
     // Create cache key from URL
-    const cacheKey = crypto.createHash('md5').update(url).digest('hex');
+    const cacheKey = createHash('md5').update(url).digest('hex');
 
     // Check cache
     const cached = imageCache.get(cacheKey);
     if (cached && (Date.now() - cached.timestamp) < CACHE_TTL) {
-      reply.header('Content-Type', cached.contentType);
+      const freshCacheEntry = touchCachedImage(cacheKey, cached);
+      reply.header('Content-Type', freshCacheEntry.contentType);
       reply.header('Cache-Control', 'public, max-age=86400'); // 24 hours
       reply.header('Access-Control-Allow-Origin', '*');
-      return reply.send(cached.buffer);
+      return reply.send(freshCacheEntry.buffer);
     }
 
-    // Fetch from YouTube
-    try {
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-          'Referer': 'https://www.youtube.com/',
-        }
-      });
+    // Check for in-flight requests for coalescing
+    let pending = inFlightRequests.get(url);
+    if (!pending) {
+      // Fetch from YouTube
+      pending = (async () => {
+        try {
+          const response = await fetch(url, {
+            headers: {
+              'User-Agent':
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+              Referer: 'https://www.youtube.com/',
+            },
+          });
 
-      if (!response.ok) {
-        if (response.status === 429) {
-          console.warn('[Backend] Rate limited by YouTube CDN for:', url);
-          // Return from cache even if expired, or return error
-          if (cached) {
-            reply.header('Content-Type', cached.contentType);
-            reply.header('Cache-Control', 'public, max-age=86400');
-            reply.header('Access-Control-Allow-Origin', '*');
-            return reply.send(cached.buffer);
+          if (!response.ok) {
+            throw new Error(`Failed to fetch image: ${response.status}`);
           }
-        }
-        throw new Error(`Failed to fetch image: ${response.status}`);
-      }
 
-      const buffer = Buffer.from(await response.arrayBuffer());
-      const contentType = response.headers.get('content-type') || 'image/jpeg';
+          const buffer = Buffer.from(await response.arrayBuffer());
+          const contentType = response.headers.get('content-type') || 'image/jpeg';
+          return { buffer, contentType };
+        } finally {
+          inFlightRequests.delete(url);
+        }
+      })();
+      inFlightRequests.set(url, pending);
+    }
+
+    try {
+      const { buffer, contentType } = await pending;
 
       // Cache the image
       imageCache.set(cacheKey, {
         buffer,
         contentType,
-        timestamp: Date.now()
+        timestamp: Date.now(),
       });
-
-      // Cleanup old cache entries if we exceed max size
-      if (imageCache.size > MAX_CACHE_SIZE) {
-        const entries = Array.from(imageCache.entries());
-        entries.sort((a, b) => a[1].timestamp - b[1].timestamp);
-        const toDelete = entries.slice(0, Math.floor(MAX_CACHE_SIZE * 0.2)); // Remove oldest 20%
-        toDelete.forEach(([key]) => imageCache.delete(key));
-      }
+      evictOldestCachedImages();
 
       reply.header('Content-Type', contentType);
       reply.header('Cache-Control', 'public, max-age=86400');

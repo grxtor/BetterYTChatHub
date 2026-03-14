@@ -31,6 +31,7 @@ const dashboardDensities = new Set<DashboardDensity>([
   'immersive',
 ]);
 const workspaceFrames = new Set<WorkspaceFrame>(['full', 'framed']);
+const settingsKeys = Object.keys(DEFAULT_APP_SETTINGS) as (keyof AppSettings)[];
 
 function isBrowser() {
   return typeof window !== 'undefined';
@@ -345,12 +346,14 @@ export function persistSettings(settings: AppSettings) {
   return normalized;
 }
 
-export function serializeSettings(settings: AppSettings) {
-  return JSON.stringify(settings);
-}
-
 export function settingsAreEqual(a: AppSettings, b: AppSettings) {
-  return serializeSettings(a) === serializeSettings(b);
+  for (const key of settingsKeys) {
+    if (!Object.is(a[key], b[key])) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 export function subscribeToSettingsChanges(listener: SettingsListener) {

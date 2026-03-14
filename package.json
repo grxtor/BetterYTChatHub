@@ -5,6 +5,7 @@
   "description": "High-performance YouTube Live chat client for streamers.",
   "license": "MIT",
   "packageManager": "pnpm@8.15.4",
+  "main": "electron/dist/main.js",
   "scripts": {
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:client\"",
     "dev:backend": "tsx backend/src/index.ts",
@@ -12,31 +13,100 @@
     "build": "npm run build:backend && npm run build:client",
     "build:backend": "tsc -p backend/tsconfig.build.json",
     "build:client": "next build client",
+    "build:electron": "tsc -p electron/tsconfig.json",
     "start": "concurrently \"npm run start:backend\" \"npm run start:client\"",
     "start:backend": "node backend/dist/backend/src/index.js",
     "start:client": "next start client",
-    "lint": "next lint client"
+    "dev:electron": "npm run build:electron && npx electron .",
+    "electron:pack": "npm run build && npm run build:electron && npx electron-builder --dir",
+    "electron:dist": "npm run build && npm run build:electron && npx electron-builder",
+    "lint": "eslint client/app client/lib client/next.config.js client/postcss.config.mjs client/next-env.d.ts --ext .js,.jsx,.ts,.tsx,.mjs"
   },
   "dependencies": {
     "@fastify/cors": "^11.1.0",
-    "better-sqlite3": "^12.4.1",
+    "better-sqlite3": "^12.6.2",
     "eventemitter3": "^5.0.1",
     "fastify": "^5.6.1",
-    "next": "^15.5.4",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0",
-    "youtubei.js": "^15.1.1",
+    "framer-motion": "^12.36.0",
+    "next": "^16.1.6",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "youtubei.js": "^16.0.1",
     "zod": "^4.1.11"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.2.1",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20.16.5",
-    "@types/react": "19.2.0",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "^19.2.3",
     "autoprefixer": "^10.4.21",
     "concurrently": "^8.2.2",
+    "electron": "^36.0.0",
+    "electron-builder": "^25.1.8",
+    "eslint": "^9.39.1",
+    "eslint-config-next": "16.1.6",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.19.1",
     "typescript": "^5.9.3"
+  },
+  "build": {
+    "appId": "com.betterytchathub.app",
+    "productName": "BetterYT Chat Hub",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/dist/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "client/.next",
+        "to": "client/.next"
+      },
+      {
+        "from": "backend/dist",
+        "to": "backend/dist"
+      },
+      {
+        "from": "client/public",
+        "to": "client/public"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.utilities",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ]
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    }
   }
 }

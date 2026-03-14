@@ -93,9 +93,9 @@ BetterYTChatHub solves that by turning chat into a real control surface.
 
 ## Current Product State
 
-This repository is currently a web app.
+This repository can run either as a browser-based web app or inside the committed Electron desktop shell.
 
-The interface is intentionally moving toward an Electron-style multi-panel workspace, but there is no Electron wrapper committed in the current codebase yet.
+The desktop shell now includes platform-aware window chrome: native traffic lights on macOS and renderer-managed caption buttons on Windows/Linux.
 
 ## Routes
 
@@ -180,9 +180,12 @@ ScreenShots/   repo screenshots
 
 ```bash
 pnpm dev
+pnpm dev:electron
 pnpm build
 pnpm build:client
 pnpm build:backend
+pnpm build:electron
+pnpm electron:dist
 pnpm start
 ```
 
@@ -244,7 +247,7 @@ If the backend logs that `YOUTUBE_LIVE_ID` is missing, that is expected behavior
 - stronger live-chat resilience against upstream YouTube schema drift
 - deeper workspace theming and preset support
 - persistent storage beyond in-memory session state
-- optional desktop packaging in a future Electron wrapper
+- harden desktop packaging and native-shell behavior across macOS, Windows, and Linux
 
 ## License
 

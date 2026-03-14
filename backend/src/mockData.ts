@@ -2,75 +2,35 @@ import type { ChatMessage } from '@shared/chat';
 import EventEmitter from 'eventemitter3';
 import crypto from 'crypto';
 
-export function trimMessages(store: ChatMessage[], max = 200) {
-    if (store.length > max) {
-        store.splice(0, store.length - max);
+const MAX_MESSAGES = 500;
+const MAX_REGULAR_MESSAGES = 200;
+
+export function trimMessages(store: ChatMessage[]) {
+  // 1. Hard limit: Remove absolute oldest if we exceed MAX_MESSAGES
+  if (store.length > MAX_MESSAGES) {
+    store.splice(0, store.length - MAX_MESSAGES);
+  }
+
+  // 2. Soft limit for regular messages:
+  // Amortize trimming by allowing it to go 50 over the limit before trimming down.
+  const isRegular = (msg: ChatMessage) => !msg.superChat && !msg.membershipGift && !msg.membershipGiftPurchase;
+  
+  // Count current regular messages
+  let regularIndices: number[] = [];
+  for (let i = 0; i < store.length; i++) {
+    if (isRegular(store[i])) {
+      regularIndices.push(i);
     }
-}
+  }
 
-export function seedMockMessages(store: ChatMessage[], emitter: EventEmitter<{ update: (msg: ChatMessage | null) => void }>) {
-    // Generate initial message
-    const initialMsg = generateMockMessage();
-    store.push(initialMsg);
-
-    return setInterval(() => {
-        const msg = generateMockMessage();
-        store.push(msg);
-        trimMessages(store);
-    }, 2000); // Every 2 seconds
-}
-
-function generateMockMessage(): ChatMessage {
-    const types = ['normal', 'normal', 'normal', 'member', 'superchat'];
-    const type = types[Math.floor(Math.random() * types.length)];
-
-    // Use publishedAt instead of timestamp
-    const base: ChatMessage = {
-        id: crypto.randomUUID(),
-        author: getRandomName(),
-        authorPhoto: `https://ui-avatars.com/api/?name=${Math.random()}&background=random`,
-        text: getRandomText(),
-        publishedAt: new Date().toISOString(),
-        isModerator: false,
-        isVerified: false
-    };
-
-    if (type === 'member') {
-        base.isMember = true;
-        base.membershipLevel = 'Gold Member';
-        base.text = 'Just joined the membership!';
-        base.runs = [{ text: 'Just joined the membership!' }];
-    } else if (type === 'superchat') {
-        base.superChat = {
-            amount: '$10.00',
-            currency: 'USD',
-            color: '#FF0000',
-            stickerUrl: Math.random() > 0.5 ? 'https://lh3.googleusercontent.com/sticker' : undefined
-        };
-        base.text = 'This is a super chat message!';
-        base.runs = [{ text: 'This is a super chat message!' }];
-    } else {
-        base.runs = [{ text: base.text || '' }];
-    }
-
-    return base;
-}
-
-function getRandomName() {
-    const names = ['Alice', 'Bob', 'Charlie', 'David', 'Eve', 'Frank', 'Grace', 'Heidi'];
-    return names[Math.floor(Math.random() * names.length)];
-}
-
-function getRandomText() {
-    const texts = [
-        'Hello World!',
-        'This is a great stream!',
-        'Can you play that song again?',
-        'PogChamp',
-        'LUL',
-        'So cool!',
-        'Greetings from Germany',
-        'How does this work?'
-    ];
-    return texts[Math.floor(Math.random() * texts.length)];
+  // Only trim when we are 50 messages OVER the limit
+  if (regularIndices.length > MAX_REGULAR_MESSAGES + 50) {
+    const toRemoveCount = regularIndices.length - MAX_REGULAR_MESSAGES;
+    const indicesToRemove = new Set(regularIndices.slice(0, toRemoveCount));
+    
+    // Filter the store in-place to remove the oldest regular messages
+    const kept = store.filter((_, index) => !indicesToRemove.has(index));
+    store.length = 0;
+    store.push(...kept);
+  }
 }

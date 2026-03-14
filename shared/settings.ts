@@ -100,3 +100,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   membersGradientColor2: '#1a1a1e',
   useSpecialMemberStyling: true,
 };
+
+export type SavedChannel = {
+  label: string;
+  videoId: string;
+};

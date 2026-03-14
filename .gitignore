@@ -29,8 +29,20 @@ node_modules/
 *.sw?
 .codellm
 # OS specific
-AGENTS.md 
+Ekran Resmi*
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+
+# Database
+*.db
+*.db-journal
+*.sqlite
+
+# Project management
+AGENTS.md
 memory-bank
-# Task files and project management
 .taskmaster/
-prd.txt 
+prd.txt

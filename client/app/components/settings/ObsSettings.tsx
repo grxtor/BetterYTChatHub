@@ -14,7 +14,7 @@ interface Props {
 
 export const ObsSettings = memo(function ObsSettings({ settings, setField, overlayUrls }: Props) {
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-3">
       <SectionCard title="Overlay URL'leri" description="Bu URL'leri OBS tarayıcı kaynağına yapıştırın.">
         <CopyUrlField label="Ana Overlay" url={overlayUrls.overlay} />
         <Divider />

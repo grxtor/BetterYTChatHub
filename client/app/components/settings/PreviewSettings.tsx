@@ -94,20 +94,12 @@ export const OverlayPreview = memo(function OverlayPreview({ settings, previewMo
 
   if (previewMode === 'dashboard') {
     return (
-      <div className="overflow-hidden rounded-[22px] border border-white/6 bg-surface-2">
-        <div className="border-b border-white/6 px-5 py-4">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h2 className="text-base font-semibold text-app-text">Dashboard Önizleme</h2>
-              <p className="mt-1 text-sm text-app-text-muted">Görüntü ayarlarının canlı yansıması.</p>
-            </div>
-            <span className="rounded-full border border-white/8 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-app-text-secondary">
-              Mesaj Akışı
-            </span>
-          </div>
+      <div className="overflow-hidden rounded-xl border border-white/6 bg-surface-2">
+        <div className="border-b border-white/6 px-3 py-2">
+          <span className="text-xs font-medium text-app-text-subtle">Mesaj Akışı</span>
         </div>
-        <div className="p-3">
-          <div className="overflow-hidden rounded-xl border border-white/6 bg-app-bg text-left">
+        <div className="p-2">
+          <div className="overflow-hidden rounded-lg border border-white/6 bg-app-bg text-left">
             <DashboardPreview settings={settings} />
           </div>
         </div>
@@ -116,39 +108,34 @@ export const OverlayPreview = memo(function OverlayPreview({ settings, previewMo
   }
 
   return (
-    <div className="overflow-hidden rounded-[22px] border border-white/6 bg-surface-2">
-      <div className="border-b border-white/6 px-5 py-4">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h2 className="text-base font-semibold text-app-text">Canlı Önizleme</h2>
-            <p className="mt-1 text-sm text-app-text-muted">OBS tarafı şeffaf kalır. Sadece seçilen mesaj kartı görünür.</p>
-          </div>
-          <span className="rounded-full border border-white/8 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-app-text-secondary">
-            {previewMode === 'superchat' ? 'Super Chat' : previewMode === 'members' ? 'Üyelik' : 'Seçili Mesaj'}
-          </span>
-        </div>
+    <div className="overflow-hidden rounded-xl border border-white/6 bg-surface-2">
+      <div className="border-b border-white/6 px-3 py-2">
+        <span className="text-xs font-medium text-app-text-subtle">
+          {previewMode === 'superchat' ? 'Super Chat' : previewMode === 'members' ? 'Üyelik' : 'Seçili Mesaj'}
+        </span>
       </div>
-      <div className="p-5">
+      <div className="p-2">
         <div
-          className="relative overflow-hidden rounded-[20px] border border-dashed border-white/10"
+          className="relative overflow-hidden rounded-lg border border-dashed border-white/10"
           style={{
             backgroundImage:
-              'linear-gradient(45deg, rgba(255,255,255,0.05) 25%, transparent 25%), linear-gradient(-45deg, rgba(255,255,255,0.05) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, rgba(255,255,255,0.05) 75%), linear-gradient(-45deg, transparent 75%, rgba(255,255,255,0.05) 75%)',
-            backgroundSize: '22px 22px',
-            backgroundPosition: '0 0, 0 11px, 11px -11px, -11px 0',
+              'linear-gradient(45deg, rgba(255,255,255,0.04) 25%, transparent 25%), linear-gradient(-45deg, rgba(255,255,255,0.04) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, rgba(255,255,255,0.04) 75%), linear-gradient(-45deg, transparent 75%, rgba(255,255,255,0.04) 75%)',
+            backgroundSize: '16px 16px',
+            backgroundPosition: '0 0, 0 8px, 8px -8px, -8px 0',
           }}
         >
-          <div className="flex min-h-[320px] items-end justify-start p-6">
+          <div className="flex min-h-[200px] items-end justify-start p-3">
             <AnimatePresence mode="wait">
               <motion.div
                 key={previewMode}
-                initial={{ opacity: 0, y: 20 }}
+                initial={{ opacity: 0, y: 12 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10, transition: { duration: 0.15 } }}
+                exit={{ opacity: 0, y: -8, transition: { duration: 0.12 } }}
                 transition={{ type: 'spring', stiffness: 350, damping: 25 }}
+                style={{ width: '100%' }}
               >
                 <div style={{ transform: `scale(${scale})`, transformOrigin: 'bottom left' }}>
-                  <OverlayCard message={message} settings={settings} />
+                  <OverlayCard message={message} settings={{ ...settings, messageMaxWidth: 9999 }} />
                 </div>
               </motion.div>
             </AnimatePresence>
@@ -167,7 +154,7 @@ interface PreviewSettingsProps {
 
 export const PreviewSettings = memo(function PreviewSettings({ settings, previewMode, setPreviewMode }: PreviewSettingsProps) {
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-3">
       <div className="flex flex-wrap gap-2">
         {(['dashboard', 'message', 'superchat', 'members'] as const).map((mode) => (
           <button

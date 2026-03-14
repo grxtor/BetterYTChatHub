@@ -29,7 +29,6 @@ import { loadSavedChannels, addSavedChannel, removeSavedChannel } from '../../li
 import { type SavedChannel } from '@shared/settings';
 import TopBar from '../components/TopBar';
 import { DashboardIcons } from '../components/Icons';
-import { DraggableCard } from '../components/DraggableCard';
 
 const STREAM_MESSAGE_LIMIT = 200;
 const VIRTUAL_LIST_OVERSCAN = 6;
@@ -773,20 +772,18 @@ export default function DashboardPage() {
                 )}
               </section>
 
-              <aside className="relative min-h-0 flex-1">
-                {settings.showSelectionPreview && (
-                  <DraggableCard id="selection-preview">
-                    <SelectionPreviewCard
-                      selection={selection}
-                      settings={settings}
-                      onClear={handleClearSelection}
-                    />
-                  </DraggableCard>
-                )}
+              <aside className="flex min-h-0 flex-col gap-4">
+                {settings.showSelectionPreview ? (
+                  <SelectionPreviewCard
+                    selection={selection}
+                    settings={settings}
+                    onClear={handleClearSelection}
+                  />
+                ) : null}
 
-                <DraggableCard id="superchat-panel">
-                  <div className="flex flex-col h-full">
-                    <div className="flex items-center gap-2 border-b border-white/6 px-4 py-3 flex-shrink-0">
+                <div className="grid min-h-0 flex-1 gap-4 md:grid-cols-2 lg:grid-cols-1">
+                  <section className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-white/6 bg-surface-2">
+                    <div className="flex items-center gap-2 border-b border-white/6 px-4 py-3">
                       <h3 className="text-sm font-semibold text-app-text">Super Chats</h3>
                       <div className="flex-1" />
                       <span className="rounded-md bg-amber-400/10 px-2 py-0.5 text-[11px] font-medium text-amber-200">
@@ -814,12 +811,10 @@ export default function DashboardPage() {
                         ))
                       )}
                     </div>
-                  </div>
-                </DraggableCard>
+                  </section>
 
-                <DraggableCard id="members-panel">
-                  <div className="flex flex-col h-full">
-                    <div className="flex items-center gap-2 border-b border-white/6 px-4 py-3 flex-shrink-0">
+                  <section className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-white/6 bg-surface-2">
+                    <div className="flex items-center gap-2 border-b border-white/6 px-4 py-3">
                       <h3 className="text-sm font-semibold text-app-text">New Members</h3>
                       <div className="flex-1" />
                       <span className="rounded-md bg-emerald-400/10 px-2 py-0.5 text-[11px] font-medium text-emerald-200">
@@ -847,8 +842,8 @@ export default function DashboardPage() {
                         ))
                       )}
                     </div>
-                  </div>
-                </DraggableCard>
+                  </section>
+                </div>
               </aside>
             </div>
           </div>

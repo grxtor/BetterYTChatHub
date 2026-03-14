@@ -14,7 +14,7 @@ interface WindowControlsProps {
 const noDragStyle = { WebkitAppRegion: 'no-drag' } as CSSProperties;
 
 const buttonClassName =
-  'grid h-10 w-11 place-items-center border-l border-white/6 text-app-text-muted transition hover:bg-white/6 hover:text-app-text';
+  'grid h-full w-10 place-items-center border-l border-white/6 text-app-text-muted transition hover:bg-white/6 hover:text-app-text';
 
 export default function WindowControls({
   show,
@@ -30,7 +30,7 @@ export default function WindowControls({
 
   return (
     <div
-      className={`-my-3 -mr-4 xl:-mr-6 flex h-[56px] overflow-hidden ${className}`.trim()}
+      className={`-my-2.5 -mr-3 xl:-mr-4 flex h-[44px] overflow-hidden ${className}`.trim()}
       style={noDragStyle}
     >
       <button

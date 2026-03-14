@@ -11,7 +11,7 @@ interface Props {
 
 export const SuperChatSettings = memo(function SuperChatSettings({ settings, setField, updateColorField }: Props) {
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-3">
       <SectionCard title="Super Chat" description="Super Chat kartının overlay davranışı ve görünümü.">
 
         {/* ── Temel Ayarlar ── */}

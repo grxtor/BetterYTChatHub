@@ -1,18 +1,48 @@
 import { ReactNode, memo, useState } from 'react';
 import type { OverlayPosition, OverlayPositionOverride } from '@shared/settings';
 
-const POSITION_OPTIONS: { value: OverlayPosition; label: string }[] = [
-  { value: 'top-left', label: 'Sol Üst' },
-  { value: 'top-right', label: 'Sağ Üst' },
-  { value: 'center', label: 'Orta' },
-  { value: 'bottom-left', label: 'Sol Alt' },
-  { value: 'bottom-right', label: 'Sağ Alt' },
-];
+// ─── Merkezi Stil Tokenları ────────────────────────────────────────────────
+// Tüm settings UI bileşenleri buradan stillerini çeker.
+// Değiştirmek istediğinde sadece buraya dokunman yeterli.
+const ui = {
+  // Kart
+  card:        'overflow-hidden rounded-xl border border-white/6 bg-surface-2',
+  cardHeader:  'border-b border-white/6 px-4 py-2',
+  cardTitle:   'text-sm font-semibold text-app-text',
+  cardDesc:    'mt-0.5 text-xs text-app-text-muted',
+  cardBody:    'px-4 py-2',
 
-export const sliderClass = 'h-1 w-full cursor-pointer appearance-none rounded-full bg-white/10 accent-app-accent';
-export const fieldControlClass = 'h-10 w-full rounded-xl border border-white/8 bg-surface-3 px-3 text-sm text-app-text outline-none transition focus:border-app-accent/40 focus:ring-1 focus:ring-app-accent/20';
-export const textareaClass = 'w-full rounded-xl border border-white/8 bg-surface-3 px-3 py-2.5 text-sm text-app-text outline-none transition focus:border-app-accent/40 focus:ring-1 focus:ring-app-accent/20 font-mono resize-y min-h-[100px]';
+  // Satır (FieldRow / ColorControl)
+  row:         'flex items-center justify-between gap-4 py-2 border-b border-white/4 last:border-b-0 first:pt-0',
+  rowLabel:    'text-sm text-app-text',
+  rowHint:     'mt-0.5 text-xs text-app-text-muted',
+  rowControl:  'shrink-0 w-40',
 
+  // Input / Select / Textarea
+  input:       'h-8 w-full rounded-lg border border-white/8 bg-surface-3 px-3 text-sm text-app-text outline-none transition focus:border-app-accent/40 focus:ring-1 focus:ring-app-accent/20',
+  textarea:    'w-full rounded-lg border border-white/8 bg-surface-3 px-3 py-2 text-sm text-app-text outline-none transition focus:border-app-accent/40 focus:ring-1 focus:ring-app-accent/20 font-mono resize-y min-h-[72px]',
+  slider:      'h-1 w-full cursor-pointer appearance-none rounded-full bg-white/10 accent-app-accent',
+
+  // Toggle switch
+  switchOn:    'inline-flex h-6 w-11 items-center justify-end rounded-full border border-app-accent/20 bg-app-accent/90 p-0.5 transition',
+  switchOff:   'inline-flex h-6 w-11 items-center justify-start rounded-full border border-white/10 bg-white/8 p-0.5 transition',
+  switchThumb: 'h-4 w-4 rounded-full bg-white shadow-[0_2px_8px_rgba(0,0,0,0.3)]',
+
+  // Buton — seçenek grid'leri (position selector, preset vb.)
+  optionActive:   'rounded-lg border border-app-accent/30 bg-app-accent/10 px-2.5 py-1.5 text-xs font-medium text-app-text transition',
+  optionInactive: 'rounded-lg border border-white/6 bg-white/[0.03] px-2.5 py-1.5 text-xs font-medium text-app-text-muted transition hover:text-app-text',
+
+  // Gelişmiş ayarlar toggle
+  advancedToggle: 'flex w-full items-center justify-between py-2.5 text-left border-t border-white/6',
+  advancedLabel:  'flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-widest text-app-text-subtle',
+
+  // URL kopyala alanı
+  urlBox:    'flex items-center gap-2 rounded-lg border border-white/8 bg-black/20 px-2 py-1.5',
+  urlCode:   'min-w-0 flex-1 truncate text-xs text-app-text-secondary',
+  urlButton: 'rounded-md border border-white/8 bg-white/[0.05] px-2.5 py-1 text-xs font-medium text-app-text transition hover:bg-white/[0.09]',
+};
+
+// ─── Yardımcılar ──────────────────────────────────────────────────────────
 export function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(' ');
 }
@@ -53,6 +83,21 @@ export function serializeColor(hex: string, alpha: number) {
   return `rgba(${r}, ${g}, ${b}, ${a})`;
 }
 
+// Dışarıdan kullanılanlar (input/textarea için className)
+export const fieldControlClass = ui.input;
+export const textareaClass = ui.textarea;
+export const sliderClass = ui.slider;
+
+const POSITION_OPTIONS: { value: OverlayPosition; label: string }[] = [
+  { value: 'top-left',     label: 'Sol Üst' },
+  { value: 'top-right',    label: 'Sağ Üst' },
+  { value: 'center',       label: 'Orta' },
+  { value: 'bottom-left',  label: 'Sol Alt' },
+  { value: 'bottom-right', label: 'Sağ Alt' },
+];
+
+// ─── Bileşenler ───────────────────────────────────────────────────────────
+
 export const ResetButton = memo(function ResetButton({ onClick }: { onClick: () => void }) {
   return (
     <button
@@ -61,7 +106,7 @@ export const ResetButton = memo(function ResetButton({ onClick }: { onClick: () 
       className="p-1 text-app-text-muted hover:text-app-text transition rounded-full hover:bg-white/5"
       title="Varsayılana Sıfırla"
     >
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
         <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
         <path d="M3 3v5h5"/>
       </svg>
@@ -69,14 +114,14 @@ export const ResetButton = memo(function ResetButton({ onClick }: { onClick: () 
   );
 });
 
-export const SectionCard = memo(function SectionCard({ title, description, children }: { title: string; description: string; children: ReactNode }) {
+export const SectionCard = memo(function SectionCard({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
   return (
-    <section className="overflow-hidden rounded-[22px] border border-white/6 bg-surface-2">
-      <div className="border-b border-white/6 px-5 py-4">
-        <h2 className="text-base font-semibold text-app-text">{title}</h2>
-        <p className="mt-1 text-sm text-app-text-muted">{description}</p>
+    <section className={ui.card}>
+      <div className={ui.cardHeader}>
+        <h2 className={ui.cardTitle}>{title}</h2>
+        {description ? <p className={ui.cardDesc}>{description}</p> : null}
       </div>
-      <div className="p-5">{children}</div>
+      <div className={ui.cardBody}>{children}</div>
     </section>
   );
 });
@@ -88,14 +133,10 @@ export const Divider = memo(function Divider() {
 export const AdvancedSection = memo(function AdvancedSection({ children, defaultOpen = false }: { children: ReactNode; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="border-t border-white/8">
-      <button
-        type="button"
-        className="flex w-full items-center justify-between px-0 py-3.5 text-left"
-        onClick={() => setOpen((v) => !v)}
-      >
-        <span className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-app-text-subtle">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform duration-200 ${open ? 'rotate-180' : ''}`}>
+    <div>
+      <button type="button" className={ui.advancedToggle} onClick={() => setOpen((v) => !v)}>
+        <span className={ui.advancedLabel}>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform duration-200 ${open ? 'rotate-180' : ''}`}>
             <polyline points="6 9 12 15 18 9" />
           </svg>
           Gelişmiş Ayarlar
@@ -106,35 +147,31 @@ export const AdvancedSection = memo(function AdvancedSection({ children, default
           </span>
         )}
       </button>
-      {open && (
-        <div className="pb-2">
-          {children}
-        </div>
-      )}
+      {open && <div className="pb-1">{children}</div>}
     </div>
   );
 });
 
 export const FieldRow = memo(function FieldRow({ label, hint, children, onReset }: { label: string; hint?: string; children: ReactNode; onReset?: () => void }) {
   return (
-    <div className="flex flex-col gap-4 py-4 first:pt-0 last:pb-0 lg:flex-row lg:items-center lg:justify-between lg:gap-6">
-      <div className="max-w-lg">
-        <div className="flex items-center gap-2">
-          <div className="text-sm font-semibold text-app-text">{label}</div>
+    <div className={ui.row}>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5">
+          <span className={ui.rowLabel}>{label}</span>
           {onReset && <ResetButton onClick={onReset} />}
         </div>
-        {hint ? <div className="mt-1 text-sm text-app-text-muted">{hint}</div> : null}
+        {hint ? <div className={ui.rowHint}>{hint}</div> : null}
       </div>
-      <div className="w-full lg:min-w-[260px] lg:max-w-[320px]">{children}</div>
+      <div className={ui.rowControl}>{children}</div>
     </div>
   );
 });
 
 export const RangeControl = memo(function RangeControl({ min, max, step, value, displayValue, onChange }: { min: number; max: number; step: number; value: number; displayValue: string; onChange: (v: number) => void }) {
   return (
-    <div className="space-y-2">
-      <input type="range" min={min} max={max} step={step} value={value} className={sliderClass} onChange={(e) => onChange(Number(e.target.value))} />
-      <div className="text-right text-sm text-app-text-secondary">{displayValue}</div>
+    <div className="space-y-1">
+      <input type="range" min={min} max={max} step={step} value={value} className={ui.slider} onChange={(e) => onChange(Number(e.target.value))} />
+      <div className="text-right text-xs text-app-text-secondary">{displayValue}</div>
     </div>
   );
 });
@@ -142,45 +179,29 @@ export const RangeControl = memo(function RangeControl({ min, max, step, value, 
 export const SwitchField = memo(function SwitchField({ label, hint, checked, onToggle, onReset }: { label: string; hint?: string; checked: boolean; onToggle: () => void; onReset?: () => void }) {
   return (
     <FieldRow label={label} hint={hint} onReset={onReset}>
-      <button
-        type="button"
-        className={cn(
-          'inline-flex h-7 w-12 items-center rounded-full border p-1 transition',
-          checked ? 'justify-end border-app-accent/20 bg-app-accent/90' : 'justify-start border-white/10 bg-white/8',
-        )}
-        role="switch"
-        aria-checked={checked}
-        onClick={onToggle}
-      >
-        <span className="h-5 w-5 rounded-full bg-white shadow-[0_6px_18px_rgba(0,0,0,0.35)]" />
+      <button type="button" className={checked ? ui.switchOn : ui.switchOff} role="switch" aria-checked={checked} onClick={onToggle}>
+        <span className={ui.switchThumb} />
       </button>
     </FieldRow>
   );
 });
 
-export const ColorControl = memo(function ColorControl({ label, value, hint, showOpacity = true, onHexChange, onAlphaChange, onReset }: { label: string; value: string; hint?: string; showOpacity?: boolean; onHexChange: (v: string) => void; onAlphaChange: (v: number) => void; onReset?: () => void }) {
+export const ColorControl = memo(function ColorControl({ label, value, hint, onHexChange, onAlphaChange: _onAlphaChange, onReset }: { label: string; value: string; hint?: string; showOpacity?: boolean; onHexChange: (v: string) => void; onAlphaChange: (v: number) => void; onReset?: () => void }) {
   const parsed = parseColorValue(value, value);
   return (
-    <div className="rounded-[18px] border border-white/8 bg-surface-3 p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2">
-            <div className="text-sm font-semibold text-app-text">{label}</div>
-            {onReset && <ResetButton onClick={onReset} />}
-          </div>
-          {hint ? <div className="mt-1 text-sm text-app-text-muted">{hint}</div> : null}
+    <div className={ui.row}>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5">
+          <span className={ui.rowLabel}>{label}</span>
+          {onReset && <ResetButton onClick={onReset} />}
         </div>
-        <code className="max-w-[140px] break-all text-right text-xs text-app-text-secondary">{value}</code>
+        {hint ? <div className={ui.rowHint}>{hint}</div> : null}
       </div>
-      <div className="mt-4 space-y-3">
-        <input type="color" value={parsed.hex} className="h-11 w-full cursor-pointer rounded-[14px] border border-white/8 bg-transparent" onChange={(e) => onHexChange(e.target.value)} />
-        {showOpacity ? (
-          <label className="grid grid-cols-[auto_1fr_auto] items-center gap-3 text-sm text-app-text-secondary">
-            <span>Opaklık</span>
-            <input type="range" min="0" max="100" step="1" value={Math.round(parsed.alpha * 100)} className={sliderClass} onChange={(e) => onAlphaChange(Number(e.target.value) / 100)} />
-            <strong className="text-app-text">{Math.round(parsed.alpha * 100)}%</strong>
-          </label>
-        ) : null}
+      <div className="flex items-center gap-2 shrink-0">
+        {parsed.alpha < 0.99 && (
+          <span className="text-xs text-app-text-muted">{Math.round(parsed.alpha * 100)}%</span>
+        )}
+        <input type="color" value={parsed.hex} className="h-7 w-10 cursor-pointer rounded border border-white/8 bg-transparent" onChange={(e) => onHexChange(e.target.value)} />
       </div>
     </div>
   );
@@ -188,19 +209,9 @@ export const ColorControl = memo(function ColorControl({ label, value, hint, sho
 
 export const PositionSelector = memo(function PositionSelector({ value, onChange }: { value: OverlayPosition | OverlayPositionOverride; onChange: (v: OverlayPosition) => void }) {
   return (
-    <div className="grid grid-cols-3 gap-1.5">
+    <div className="grid grid-cols-3 gap-1">
       {POSITION_OPTIONS.map((opt) => (
-        <button
-          key={opt.value}
-          type="button"
-          className={cn(
-            'rounded-xl border px-3 py-2 text-xs font-medium transition',
-            value === opt.value
-              ? 'border-app-accent/30 bg-app-accent/12 text-app-text'
-              : 'border-white/8 bg-white/[0.04] text-app-text-muted hover:text-app-text',
-          )}
-          onClick={() => onChange(opt.value)}
-        >
+        <button key={opt.value} type="button" className={value === opt.value ? ui.optionActive : ui.optionInactive} onClick={() => onChange(opt.value)}>
           {opt.label}
         </button>
       ))}
@@ -217,15 +228,11 @@ export const CopyUrlField = memo(function CopyUrlField({ label, url }: { label: 
     window.setTimeout(() => setCopied(false), 1600);
   };
   return (
-    <div className="py-3 first:pt-0 last:pb-0">
-      <div className="text-sm font-semibold text-app-text mb-2">{label}</div>
-      <div className="flex items-center gap-2 rounded-2xl border border-white/8 bg-black/20 p-2">
-        <code className="min-w-0 flex-1 truncate px-2 text-xs text-app-text-secondary">{url}</code>
-        <button
-          type="button"
-          className="rounded-lg border border-white/8 bg-white/[0.05] px-3 py-2 text-xs font-medium text-app-text transition hover:bg-white/[0.09]"
-          onClick={copy}
-        >
+    <div className="py-2 first:pt-0 last:pb-0">
+      <div className="mb-1.5 text-sm text-app-text">{label}</div>
+      <div className={ui.urlBox}>
+        <code className={ui.urlCode}>{url}</code>
+        <button type="button" className={ui.urlButton} onClick={copy}>
           {copied ? 'Kopyalandı' : 'Kopyala'}
         </button>
       </div>

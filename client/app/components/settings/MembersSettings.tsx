@@ -11,7 +11,7 @@ interface Props {
 
 export const MembersSettings = memo(function MembersSettings({ settings, setField, updateColorField }: Props) {
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-3">
       <SectionCard title="Üyeler" description="Üyelik etkinliklerinin overlay davranışı ve görünümü.">
 
         {/* ── Temel Ayarlar ── */}

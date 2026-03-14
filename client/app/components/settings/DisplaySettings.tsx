@@ -10,7 +10,7 @@ interface Props {
 
 export const DisplaySettings = memo(function DisplaySettings({ settings, setField }: Props) {
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-3">
       <SectionCard title="Kart Elemanları" description="Overlay kartında hangi bilgiler gösterilsin?">
         <SwitchField label="Avatarları Göster" hint="Kullanıcı fotoğrafını kart üzerinde gösterir." checked={settings.showAvatars} onToggle={() => setField('showAvatars', !settings.showAvatars)} onReset={() => setField('showAvatars', DEFAULT_APP_SETTINGS.showAvatars)} />
         <Divider />

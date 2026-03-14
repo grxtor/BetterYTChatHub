@@ -11,7 +11,7 @@ interface Props {
 
 export const AdvancedSettings = memo(function AdvancedSettings({ settings, setField, clearAdvancedCss }: Props) {
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-3">
       <SectionCard title="Sistem" description="Sunucu portu ve pencere ayarları.">
         <FieldRow label="Sunucu Portu" hint="Backend API'nin dinleyeceği port. Değişiklik sonrası yeniden başlatın." onReset={() => setField('serverPort', DEFAULT_APP_SETTINGS.serverPort)}>
           <input

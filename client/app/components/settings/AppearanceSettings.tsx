@@ -12,7 +12,7 @@ interface Props {
 
 export const AppearanceSettings = memo(function AppearanceSettings({ settings, setField, updateColorField, resetOverlayTheme }: Props) {
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-3">
       <SectionCard title="Kart Görünümü" description="Overlay mesaj kartının boyut ve renk ayarları.">
         <FieldRow label="Mesaj Kartı Boyutu" hint="Seçili mesaj kartını büyütür veya küçültür." onReset={() => setField('overlayScale', DEFAULT_APP_SETTINGS.overlayScale)}>
           <RangeControl min={0.7} max={1.8} step={0.05} value={settings.overlayScale} displayValue={`${Math.round(settings.overlayScale * 100)}%`} onChange={(v) => setField('overlayScale', v)} />

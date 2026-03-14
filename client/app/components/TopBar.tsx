@@ -131,33 +131,24 @@ export default function TopBar({
 
   return (
     <header
-      className="top-bar relative border-b border-white/6 bg-surface-1/95 px-4 shadow-panel backdrop-blur xl:px-6"
+      className="top-bar relative border-b border-white/6 bg-surface-1/95 px-3 backdrop-blur xl:px-4"
       style={dragStyle}
     >
       {isElectron ? (
-        <div
-          aria-hidden="true"
-          className="absolute inset-x-0 top-0 h-3"
-          style={dragStyle}
-        />
+        <div aria-hidden="true" className="absolute inset-x-0 top-0 h-3" style={dragStyle} />
       ) : null}
 
-      <div className="flex min-w-0 items-center gap-3">
+      <div className="flex min-w-0 items-center gap-2.5">
         {isMac ? <div className="h-px w-[88px] shrink-0" aria-hidden="true" /> : null}
-        <div className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-[#ff2d2d] to-[#b40000] text-sm font-bold text-white shadow-lg shadow-red-950/30">
+        <div className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-[#ff2d2d] to-[#b40000] text-[11px] font-bold text-white">
           ▶
         </div>
-        <div className="min-w-0">
-          <div className="truncate text-sm font-semibold tracking-[-0.02em] text-app-text md:text-base">
-            BetterYT Chat
-          </div>
-          <div className="hidden text-xs text-app-text-subtle md:block">
-            Broadcast console for live moderation and OBS output
-          </div>
-        </div>
+        <span className="truncate text-sm font-semibold tracking-tight text-app-text">
+          BetterYT Chat
+        </span>
       </div>
 
-      <div className="mx-3 hidden h-6 w-px bg-white/8 lg:block" />
+      <div className="mx-3 hidden h-5 w-px bg-white/8 lg:block" />
 
       {!isSettings && (
         <div className="min-w-0 flex-1" style={noDragStyle}>
@@ -165,8 +156,8 @@ export default function TopBar({
             <div className="flex w-full max-w-2xl items-center gap-2">
               <input
                 type="text"
-                className="h-10 flex-1 rounded-xl border border-white/8 bg-surface-2 px-4 text-sm text-app-text outline-none transition focus:border-app-accent/70 focus:ring-2 focus:ring-app-accent/20"
-                placeholder="Paste YouTube Live URL or video ID"
+                className="h-8 flex-1 rounded-lg border border-white/8 bg-surface-2 px-3 text-sm text-app-text outline-none transition focus:border-app-accent/60 focus:ring-1 focus:ring-app-accent/20"
+                placeholder="YouTube Live URL veya video ID"
                 value={streamInput}
                 onChange={(event) => onStreamInputChange?.(event.target.value)}
                 onKeyDown={handleKeyDown}
@@ -178,7 +169,7 @@ export default function TopBar({
                   <button
                     type="button"
                     title="Save this channel"
-                    className="h-10 w-10 rounded-xl border border-white/8 bg-surface-2 text-app-text-muted transition hover:border-app-accent/40 hover:bg-surface-3 hover:text-amber-300"
+                    className="h-8 w-8 rounded-lg border border-white/8 bg-surface-2 text-app-text-muted transition hover:border-amber-500/30 hover:bg-surface-3 hover:text-amber-300"
                     onClick={() => {
                       setSaveLabel('');
                       setShowSaveForm(v => !v);
@@ -221,7 +212,7 @@ export default function TopBar({
                 <button
                   type="button"
                   title="Saved channels"
-                  className={`h-10 rounded-xl border px-3 text-sm font-medium transition ${
+                  className={`h-8 rounded-lg border px-2.5 text-xs font-medium transition ${
                     showFavorites
                       ? 'border-app-accent/40 bg-app-accent/10 text-app-accent'
                       : 'border-white/8 bg-surface-2 text-app-text-muted hover:border-white/15 hover:bg-surface-3 hover:text-app-text'
@@ -281,7 +272,7 @@ export default function TopBar({
 
               <button
                 type="button"
-                className="h-10 rounded-xl bg-app-accent px-4 text-sm font-semibold text-white transition hover:bg-app-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+                className="h-8 rounded-lg bg-app-accent px-3 text-xs font-semibold text-white transition hover:bg-app-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
                 onClick={onConnect}
                 disabled={connecting || !streamInput.trim()}
               >
@@ -365,10 +356,10 @@ export default function TopBar({
 
         <button
           type="button"
-          className={`grid h-10 w-10 place-items-center rounded-xl border transition ${
+          className={`grid h-8 w-8 place-items-center rounded-lg border transition ${
             isSettings
               ? 'border-white/10 bg-surface-2 text-app-text hover:bg-surface-3'
-              : 'border-white/0 bg-transparent text-app-text-muted hover:border-white/10 hover:bg-surface-2 hover:text-app-text'
+              : 'border-transparent bg-transparent text-app-text-muted hover:border-white/10 hover:bg-surface-2 hover:text-app-text'
           }`}
           onClick={() => router.push(isSettings ? '/dashboard' : '/settings')}
           title={isSettings ? 'Back to Dashboard' : 'Settings'}

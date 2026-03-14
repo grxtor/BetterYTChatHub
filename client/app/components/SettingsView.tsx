@@ -117,6 +117,71 @@ function getSaveTone(s: SettingsSaveState) {
   }
 }
 
+// ─── Mini Bileşenler ──────────────────────────────────────────────────────
+const PREVIEW_MODES = [
+  { id: 'dashboard', label: 'Akış' },
+  { id: 'message',   label: 'Mesaj' },
+  { id: 'superchat', label: 'Super Chat' },
+  { id: 'members',   label: 'Üyelik' },
+] as const;
+
+function NavButton({ section, active, onClick }: { section: SectionMeta; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      className={cn(
+        'mb-1 flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-sm transition',
+        active ? 'bg-white/[0.08] text-app-text' : 'text-app-text-muted hover:bg-white/[0.04] hover:text-app-text',
+      )}
+      onClick={onClick}
+    >
+      <span className={cn('shrink-0', active ? 'text-app-text' : 'text-app-text-subtle')}>{section.icon}</span>
+      <span className="font-medium">{section.label}</span>
+    </button>
+  );
+}
+
+function MobileTab({ section, active, onClick }: { section: SectionMeta; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      className={cn(
+        'flex shrink-0 items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition',
+        active ? 'border-app-accent/30 bg-app-accent/12 text-app-text' : 'border-white/8 bg-white/[0.04] text-app-text-muted',
+      )}
+      onClick={onClick}
+    >
+      <span className={cn('shrink-0', active ? 'text-app-accent' : 'text-app-text-subtle')}>{section.icon}</span>
+      {section.label}
+    </button>
+  );
+}
+
+function PreviewTab({ label, active, onClick }: { mode: string; label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      className={cn(
+        'rounded-md border px-2 py-1 text-[11px] font-medium transition',
+        active ? 'border-app-accent/30 bg-app-accent/10 text-app-text' : 'border-white/6 bg-transparent text-app-text-muted hover:text-app-text',
+      )}
+      onClick={onClick}
+    >
+      {label}
+    </button>
+  );
+}
+
+// ─── Layout Tokenları ─────────────────────────────────────────────────────
+const layout = {
+  nav:         'flex w-56 shrink-0 flex-col border-r border-white/6 bg-surface-1',
+  content:     'min-w-0 flex-1 overflow-y-auto',
+  contentInner:'w-full max-w-4xl px-8 py-4',
+  sectionGap:  'space-y-3',
+  preview:     'sticky top-0 hidden w-[30rem] shrink-0 border-l border-white/6 bg-surface-1 lg:flex lg:flex-col',
+  previewTabs: 'grid grid-cols-2 gap-1.5 border-b border-white/6 p-3',
+};
+
 export default function SettingsView({ settings, onUpdate, overlayUrls, saveState }: SettingsViewProps) {
   const [activeSection, setActiveSection] = useState<SettingsSection>('presets');
   const [previewMode, setPreviewMode] = useState<PreviewMode>('message');
@@ -213,96 +278,58 @@ export default function SettingsView({ settings, onUpdate, overlayUrls, saveStat
     <div className="flex h-full">
       {isDesktop ? (
         <>
-          <nav className="flex w-56 shrink-0 flex-col border-r border-white/6 bg-surface-1">
-            <div className="px-3 pt-5 pb-4">
-              <h1 className="text-base font-semibold tracking-[-0.02em] text-app-text">Ayarlar</h1>
+          <nav className={layout.nav}>
+            <div className="px-4 pt-5 pb-3">
+              <h1 className="text-base font-semibold text-app-text">Ayarlar</h1>
             </div>
-
-            <div className="flex-1 overflow-y-auto px-1.5 py-2">
+            <div className="flex-1 overflow-y-auto px-2 pb-2">
               {SECTIONS.map((section) => (
-                <button
+                <NavButton
                   key={section.id}
-                  type="button"
-                  className={cn(
-                    'mb-1 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition',
-                    activeSection === section.id
-                      ? 'bg-white/[0.06] text-app-text'
-                      : 'text-app-text-muted hover:bg-white/[0.03] hover:text-app-text',
-                  )}
+                  section={section}
+                  active={activeSection === section.id}
                   onClick={() => setActiveSection(section.id)}
-                >
-                  <span
-                    className={cn(
-                      'shrink-0 transition',
-                      activeSection === section.id ? 'text-app-accent' : 'text-app-text-subtle',
-                    )}
-                  >
-                    {section.icon}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="font-medium">{section.label}</div>
-                  </div>
-                </button>
+                />
               ))}
             </div>
-
-            <div className="border-t border-white/6 px-3 py-3">
-              <span className={`inline-flex items-center rounded-full px-3 py-1.5 text-[11px] font-medium ${getSaveTone(saveState)}`}>
+            <div className="border-t border-white/6 px-3 py-2.5">
+              <span className={`inline-flex items-center rounded-md border px-2 py-1 text-[11px] font-medium ${getSaveTone(saveState)}`}>
                 {getSaveLabel(saveState)}
               </span>
             </div>
           </nav>
 
-          <div className="flex-1 overflow-y-auto">
-            <div className="flex h-full w-full gap-4 px-5 py-5 lg:gap-5 lg:px-6">
-              <div className="min-w-0 flex-1">
-                <div className="mb-6">
-                  <h2 className="text-xl font-semibold text-app-text">{currentSection.label}</h2>
-                  <p className="mt-1 text-sm text-app-text-muted">{currentSection.hint}</p>
-                </div>
-                <div className="max-w-2xl">
+          <div className="flex h-full min-w-0 flex-1">
+            <div className={layout.content}>
+              <div className={layout.contentInner}>
+                <div className={layout.sectionGap}>
+                  <div className="mb-3">
+                    <h2 className="text-lg font-semibold text-app-text">{currentSection.label}</h2>
+                    <p className="mt-0.5 text-sm text-app-text-muted">{currentSection.hint}</p>
+                  </div>
                   {renderContent()}
                 </div>
               </div>
-
-              {showDesktopPreviewRail ? (
-                <aside className="sticky top-5 hidden w-96 shrink-0 self-start lg:block">
-                  <div className="flex flex-col gap-3">
-                    <div className="rounded-2xl border border-white/6 bg-surface-2 p-3">
-                      <div className="mb-3 text-[10px] font-semibold uppercase tracking-widest text-app-text-subtle">
-                        Preview
-                      </div>
-                      <div className="grid grid-cols-2 gap-1.5">
-                        {(['dashboard', 'message', 'superchat', 'members'] as const).map((mode) => (
-                          <button
-                            key={mode}
-                            type="button"
-                            className={cn(
-                              'rounded-lg border px-2.5 py-1.5 text-xs font-medium transition',
-                              previewMode === mode
-                                ? 'border-app-accent/30 bg-white/[0.08] text-app-text'
-                                : 'border-white/8 bg-white/[0.03] text-app-text-muted hover:text-app-text',
-                            )}
-                            onClick={() => setPreviewMode(mode)}
-                          >
-                            {mode === 'dashboard' ? 'Akış' : mode === 'message' ? 'Mesaj' : mode === 'superchat' ? 'Super Chat' : 'Üyelik'}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    <OverlayPreview settings={settings} previewMode={previewMode} />
-
-                    <SectionCard title="Canlı Ön İzleme" description="Ayarlamalar anında burada görünür.">
-                      <div className="space-y-2 text-sm text-app-text-muted">
-                        <p>Kart tasarımı, renkler ve boyut değişiklikleri canlı yansır.</p>
-                        <p>OBS overlay'daki görünüm ile eşleşir.</p>
-                      </div>
-                    </SectionCard>
-                  </div>
-                </aside>
-              ) : null}
             </div>
+
+            {showDesktopPreviewRail ? (
+              <aside className={layout.preview} style={{ height: '100%' }}>
+                <div className={layout.previewTabs}>
+                  {PREVIEW_MODES.map(({ id, label }) => (
+                    <PreviewTab
+                      key={id}
+                      mode={id}
+                      label={label}
+                      active={previewMode === id}
+                      onClick={() => setPreviewMode(id)}
+                    />
+                  ))}
+                </div>
+                <div className="flex-1 overflow-y-auto p-4">
+                  <OverlayPreview settings={settings} previewMode={previewMode} />
+                </div>
+              </aside>
+            ) : null}
           </div>
         </>
       ) : (
@@ -316,22 +343,12 @@ export default function SettingsView({ settings, onUpdate, overlayUrls, saveStat
             </div>
             <div className="scrollbar-none flex gap-1 overflow-x-auto pb-1">
               {SECTIONS.map((section) => (
-                <button
+                <MobileTab
                   key={section.id}
-                  type="button"
-                  className={cn(
-                    'flex shrink-0 items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition',
-                    activeSection === section.id
-                      ? 'border-app-accent/30 bg-app-accent/12 text-app-text'
-                      : 'border-white/8 bg-white/[0.04] text-app-text-muted',
-                  )}
+                  section={section}
+                  active={activeSection === section.id}
                   onClick={() => setActiveSection(section.id)}
-                >
-                  <span className={cn('shrink-0', activeSection === section.id ? 'text-app-accent' : 'text-app-text-subtle')}>
-                    {section.icon}
-                  </span>
-                  {section.label}
-                </button>
+                />
               ))}
             </div>
           </div>

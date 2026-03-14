@@ -126,18 +126,19 @@
 }
 
 /* ============================================
-   TOP BAR (56px)
+   TOP BAR (44px)
    ============================================ */
 .top-bar {
-  height: 56px;
+  height: 44px;
   background: var(--surface-1);
   display: flex;
   align-items: center;
-  padding: 0 var(--sp-4);
-  gap: var(--sp-3);
+  padding: 0 var(--sp-3);
+  gap: var(--sp-2);
   flex-shrink: 0;
-  box-shadow: var(--shadow-1);
   z-index: 100;
+  position: relative;
+  overflow: visible;
 }
 
 

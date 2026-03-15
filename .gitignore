@@ -30,12 +30,7 @@ node_modules/
 *.sw?
 .codellm
 # OS specific
-Ekran Resmi*
-*.png
-*.jpg
-*.jpeg
-*.gif
-*.bmp
+
 
 # Screenshots
 image/package/

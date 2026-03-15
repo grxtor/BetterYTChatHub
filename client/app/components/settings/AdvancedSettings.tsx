@@ -1,7 +1,6 @@
 import { memo } from 'react';
 import type { AppSettings } from '@shared/settings';
-import { DEFAULT_APP_SETTINGS } from '@shared/settings';
-import { SectionCard, FieldRow, Divider, cn, fieldControlClass, textareaClass } from './SettingsUI';
+import { SectionCard, FieldRow, Divider, cn, fieldControlClass, textareaClass, makeResetter } from './SettingsUI';
 
 interface Props {
   settings: AppSettings;
@@ -10,10 +9,12 @@ interface Props {
 }
 
 export const AdvancedSettings = memo(function AdvancedSettings({ settings, setField, clearAdvancedCss }: Props) {
+  const reset = makeResetter(setField);
+
   return (
     <div className="flex flex-col gap-3">
       <SectionCard title="Sistem" description="Sunucu portu ve pencere ayarları.">
-        <FieldRow label="Sunucu Portu" hint="Backend API'nin dinleyeceği port. Değişiklik sonrası yeniden başlatın." onReset={() => setField('serverPort', DEFAULT_APP_SETTINGS.serverPort)}>
+        <FieldRow label="Sunucu Portu" hint="Backend API'nin dinleyeceği port. Değişiklik sonrası yeniden başlatın." onReset={reset('serverPort')}>
           <input
             type="number"
             min={1024}
@@ -24,7 +25,7 @@ export const AdvancedSettings = memo(function AdvancedSettings({ settings, setFi
           />
         </FieldRow>
         <Divider />
-        <FieldRow label="Pencere Çerçevesi" hint="Electron pencere stili. Electron dışında etkisizdir." onReset={() => setField('workspaceFrame', DEFAULT_APP_SETTINGS.workspaceFrame)}>
+        <FieldRow label="Pencere Çerçevesi" hint="Electron pencere stili. Electron dışında etkisizdir." onReset={reset('workspaceFrame')}>
           <div className="flex gap-1.5">
             {(['full', 'framed'] as const).map((f) => (
               <button
@@ -45,37 +46,13 @@ export const AdvancedSettings = memo(function AdvancedSettings({ settings, setFi
         </FieldRow>
       </SectionCard>
 
-      <SectionCard title="Özel CSS" description="Ana overlay kartı için global CSS kuralları.">
-        <FieldRow label="Genel Overlay" hint=".overlay__card sınıfını hedef alır." onReset={() => setField('customCss', DEFAULT_APP_SETTINGS.customCss)}>
+      <SectionCard title="Genel Overlay CSS" description="Tüm overlay kartlarına uygulanan global CSS kuralları.">
+        <FieldRow label="Genel Overlay" hint=".overlay__card sınıfını hedef alır." onReset={reset('customCss')}>
           <textarea
             className={textareaClass}
             value={settings.customCss}
             placeholder="/* Tüm kartlara uygulanır */"
             onChange={(e) => setField('customCss', e.target.value)}
-            rows={4}
-          />
-        </FieldRow>
-      </SectionCard>
-
-      <SectionCard title="Super Chat CSS" description="Sadece Super Chat kartlarına uygulanır.">
-        <FieldRow label="Super Chat" onReset={() => setField('superChatCss', DEFAULT_APP_SETTINGS.superChatCss)}>
-          <textarea
-            className={textareaClass}
-            value={settings.superChatCss}
-            placeholder="/* Sadece Super Chat kartı */"
-            onChange={(e) => setField('superChatCss', e.target.value)}
-            rows={4}
-          />
-        </FieldRow>
-      </SectionCard>
-
-      <SectionCard title="Üye CSS" description="Sadece üyelik kartlarına uygulanır.">
-        <FieldRow label="Üye Kartı" onReset={() => setField('membersCss', DEFAULT_APP_SETTINGS.membersCss)}>
-          <textarea
-            className={textareaClass}
-            value={settings.membersCss}
-            placeholder="/* Sadece üyelik kartı */"
-            onChange={(e) => setField('membersCss', e.target.value)}
             rows={4}
           />
         </FieldRow>

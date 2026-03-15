@@ -1,45 +1,46 @@
 import { ReactNode, memo, useState } from 'react';
-import type { OverlayPosition, OverlayPositionOverride } from '@shared/settings';
+import type { AppSettings, OverlayPosition, OverlayPositionOverride } from '@shared/settings';
+import { DEFAULT_APP_SETTINGS } from '@shared/settings';
 
 // ─── Merkezi Stil Tokenları ────────────────────────────────────────────────
 // Tüm settings UI bileşenleri buradan stillerini çeker.
 // Değiştirmek istediğinde sadece buraya dokunman yeterli.
 const ui = {
   // Kart
-  card:        'overflow-hidden rounded-xl border border-white/6 bg-surface-2',
-  cardHeader:  'border-b border-white/6 px-4 py-2',
-  cardTitle:   'text-sm font-semibold text-app-text',
+  card:        'overflow-hidden rounded-2xl border border-white/6 bg-surface-2 shadow-sm',
+  cardHeader:  'border-b border-white/6 bg-gradient-to-r from-white/[0.02] to-transparent px-5 py-3',
+  cardTitle:   'text-[13px] font-semibold tracking-tight text-app-text',
   cardDesc:    'mt-0.5 text-xs text-app-text-muted',
-  cardBody:    'px-4 py-2',
+  cardBody:    'px-5 py-3',
 
   // Satır (FieldRow / ColorControl)
-  row:         'flex items-center justify-between gap-4 py-2 border-b border-white/4 last:border-b-0 first:pt-0',
+  row:         'flex items-center justify-between gap-6 py-3 border-b border-white/4 last:border-b-0 first:pt-0',
   rowLabel:    'text-sm text-app-text',
   rowHint:     'mt-0.5 text-xs text-app-text-muted',
-  rowControl:  'shrink-0 w-40',
+  rowControl:  'shrink-0 w-44',
 
   // Input / Select / Textarea
-  input:       'h-8 w-full rounded-lg border border-white/8 bg-surface-3 px-3 text-sm text-app-text outline-none transition focus:border-app-accent/40 focus:ring-1 focus:ring-app-accent/20',
-  textarea:    'w-full rounded-lg border border-white/8 bg-surface-3 px-3 py-2 text-sm text-app-text outline-none transition focus:border-app-accent/40 focus:ring-1 focus:ring-app-accent/20 font-mono resize-y min-h-[72px]',
-  slider:      'h-1 w-full cursor-pointer appearance-none rounded-full bg-white/10 accent-app-accent',
+  input:       'h-9 w-full rounded-xl border border-white/8 bg-surface-3 px-3 text-sm text-app-text outline-none transition focus:border-app-accent/40 focus:ring-1 focus:ring-app-accent/20',
+  textarea:    'w-full rounded-xl border border-white/8 bg-surface-3 px-3 py-2.5 text-sm text-app-text outline-none transition focus:border-app-accent/40 focus:ring-1 focus:ring-app-accent/20 font-mono resize-y min-h-[72px]',
+  slider:      'h-1.5 w-full cursor-pointer appearance-none rounded-full bg-white/10 accent-app-accent',
 
   // Toggle switch
-  switchOn:    'inline-flex h-6 w-11 items-center justify-end rounded-full border border-app-accent/20 bg-app-accent/90 p-0.5 transition',
-  switchOff:   'inline-flex h-6 w-11 items-center justify-start rounded-full border border-white/10 bg-white/8 p-0.5 transition',
-  switchThumb: 'h-4 w-4 rounded-full bg-white shadow-[0_2px_8px_rgba(0,0,0,0.3)]',
+  switchOn:    'inline-flex h-[26px] w-12 items-center justify-end rounded-full border border-app-accent/20 bg-app-accent/90 p-0.5 transition-all duration-150',
+  switchOff:   'inline-flex h-[26px] w-12 items-center justify-start rounded-full border border-white/10 bg-white/8 p-0.5 transition-all duration-150',
+  switchThumb: 'h-[18px] w-[18px] rounded-full bg-white shadow-[0_2px_8px_rgba(0,0,0,0.3)]',
 
   // Buton — seçenek grid'leri (position selector, preset vb.)
-  optionActive:   'rounded-lg border border-app-accent/30 bg-app-accent/10 px-2.5 py-1.5 text-xs font-medium text-app-text transition',
-  optionInactive: 'rounded-lg border border-white/6 bg-white/[0.03] px-2.5 py-1.5 text-xs font-medium text-app-text-muted transition hover:text-app-text',
+  optionActive:   'rounded-lg border border-app-accent/30 bg-app-accent/10 px-2.5 py-1.5 text-xs font-medium text-app-text transition shadow-sm shadow-app-accent/10',
+  optionInactive: 'rounded-lg border border-white/6 bg-white/[0.03] px-2.5 py-1.5 text-xs font-medium text-app-text-muted transition hover:text-app-text hover:bg-white/[0.06]',
 
   // Gelişmiş ayarlar toggle
-  advancedToggle: 'flex w-full items-center justify-between py-2.5 text-left border-t border-white/6',
+  advancedToggle: 'flex w-full items-center justify-between py-3 text-left border-t border-white/6',
   advancedLabel:  'flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-widest text-app-text-subtle',
 
   // URL kopyala alanı
-  urlBox:    'flex items-center gap-2 rounded-lg border border-white/8 bg-black/20 px-2 py-1.5',
+  urlBox:    'flex items-center gap-2 rounded-xl border border-white/8 bg-black/20 px-3 py-2',
   urlCode:   'min-w-0 flex-1 truncate text-xs text-app-text-secondary',
-  urlButton: 'rounded-md border border-white/8 bg-white/[0.05] px-2.5 py-1 text-xs font-medium text-app-text transition hover:bg-white/[0.09]',
+  urlButton: 'rounded-lg border border-white/8 bg-white/[0.05] px-3 py-1.5 text-xs font-medium text-app-text transition hover:bg-white/[0.09]',
 };
 
 // ─── Yardımcılar ──────────────────────────────────────────────────────────
@@ -81,6 +82,14 @@ export function serializeColor(hex: string, alpha: number) {
   const a = clamp(Number(alpha.toFixed(2)), 0, 1);
   if (a >= 0.99) return normalizeHex(hex);
   return `rgba(${r}, ${g}, ${b}, ${a})`;
+}
+
+// ─── Reset Helper ───────────────────────────────────────────────────────
+export function makeResetter(
+  setField: <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => void,
+) {
+  return <K extends keyof AppSettings>(key: K) =>
+    () => setField(key, DEFAULT_APP_SETTINGS[key]);
 }
 
 // Dışarıdan kullanılanlar (input/textarea için className)
@@ -169,9 +178,13 @@ export const FieldRow = memo(function FieldRow({ label, hint, children, onReset 
 
 export const RangeControl = memo(function RangeControl({ min, max, step, value, displayValue, onChange }: { min: number; max: number; step: number; value: number; displayValue: string; onChange: (v: number) => void }) {
   return (
-    <div className="space-y-1">
+    <div className="space-y-1.5">
       <input type="range" min={min} max={max} step={step} value={value} className={ui.slider} onChange={(e) => onChange(Number(e.target.value))} />
-      <div className="text-right text-xs text-app-text-secondary">{displayValue}</div>
+      <div className="flex justify-end">
+        <span className="rounded-md border border-white/8 bg-white/[0.04] px-2 py-0.5 text-[11px] font-medium tabular-nums text-app-text-secondary">
+          {displayValue}
+        </span>
+      </div>
     </div>
   );
 });
@@ -186,23 +199,38 @@ export const SwitchField = memo(function SwitchField({ label, hint, checked, onT
   );
 });
 
-export const ColorControl = memo(function ColorControl({ label, value, hint, onHexChange, onAlphaChange: _onAlphaChange, onReset }: { label: string; value: string; hint?: string; showOpacity?: boolean; onHexChange: (v: string) => void; onAlphaChange: (v: number) => void; onReset?: () => void }) {
+export const ColorControl = memo(function ColorControl({ label, value, hint, showOpacity = true, onHexChange, onAlphaChange, onReset }: { label: string; value: string; hint?: string; showOpacity?: boolean; onHexChange: (v: string) => void; onAlphaChange: (v: number) => void; onReset?: () => void }) {
   const parsed = parseColorValue(value, value);
   return (
-    <div className={ui.row}>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5">
-          <span className={ui.rowLabel}>{label}</span>
-          {onReset && <ResetButton onClick={onReset} />}
+    <div>
+      <div className={ui.row}>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <span className={ui.rowLabel}>{label}</span>
+            {onReset && <ResetButton onClick={onReset} />}
+          </div>
+          {hint ? <div className={ui.rowHint}>{hint}</div> : null}
         </div>
-        {hint ? <div className={ui.rowHint}>{hint}</div> : null}
-      </div>
-      <div className="flex items-center gap-2 shrink-0">
-        {parsed.alpha < 0.99 && (
+        <div className="flex items-center gap-2 shrink-0">
           <span className="text-xs text-app-text-muted">{Math.round(parsed.alpha * 100)}%</span>
-        )}
-        <input type="color" value={parsed.hex} className="h-7 w-10 cursor-pointer rounded border border-white/8 bg-transparent" onChange={(e) => onHexChange(e.target.value)} />
+          <input type="color" value={parsed.hex} className="h-7 w-10 cursor-pointer rounded border border-white/8 bg-transparent" onChange={(e) => onHexChange(e.target.value)} />
+        </div>
       </div>
+      {showOpacity && (
+        <div className="flex items-center gap-3 pb-2 pt-1">
+          <span className="text-[10px] font-medium text-app-text-subtle w-14 shrink-0">Opaklık</span>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            value={parsed.alpha}
+            className={ui.slider}
+            onChange={(e) => onAlphaChange(Number(e.target.value))}
+          />
+          <span className="text-xs tabular-nums text-app-text-secondary w-10 text-right">{Math.round(parsed.alpha * 100)}%</span>
+        </div>
+      )}
     </div>
   );
 });

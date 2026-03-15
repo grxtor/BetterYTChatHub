@@ -38,6 +38,9 @@ const VIRTUAL_LIST_OVERSCAN = 6;
  */
 
 function appendStreamMessage(messages: ChatMessage[], message: ChatMessage) {
+  // Duplicate ID kontrolü — YouTube API bazen aynı mesajı tekrar gönderebilir
+  if (messages.some((m) => m.id === message.id)) return messages;
+
   if (messages.length < STREAM_MESSAGE_LIMIT) {
     return [...messages, message];
   }
@@ -66,7 +69,10 @@ function useChatStream() {
     source.addEventListener('backlog', (e: MessageEvent) => {
       try {
         const data = JSON.parse(e.data);
-        const msgs: ChatMessage[] = Array.isArray(data.messages) ? data.messages : [];
+        const raw: ChatMessage[] = Array.isArray(data.messages) ? data.messages : [];
+        // Duplicate ID'leri filtrele
+        const seen = new Set<string>();
+        const msgs = raw.filter((m) => { if (seen.has(m.id)) return false; seen.add(m.id); return true; });
         setMessages(msgs.slice(-STREAM_MESSAGE_LIMIT));
         
         let sc = 0, mem = 0;

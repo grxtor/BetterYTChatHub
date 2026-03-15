@@ -72,18 +72,15 @@ BetterYTChatHub solves that by turning chat into a real control surface.
 
 | Feature | Preview |
 | --- | --- |
+| **Landing Page** | ![Landing Page](ScreenShots/landingpage.png) |
 | **Dashboard** | ![Dashboard](ScreenShots/dashboard.png) |
 | **Settings** | ![Settings](ScreenShots/settings.png) |
-| **Overlay** | ![Overlay](ScreenShots/overlay.png) |
-| **Super Chat** | ![Super Chat](ScreenShots/superchat.png) |
-| **Members** | ![Members](ScreenShots/members.png) |
-| **Message Selection** | ![Message Selection](ScreenShots/select_text.png) |
 
 ## Tech Stack
 
 | Layer | Technology |
 | --- | --- |
-| Frontend | Next.js 15, React 19, TypeScript |
+| Frontend | Next.js 16, React 19, TypeScript |
 | Backend | Fastify, `youtubei.js`, SSE |
 | Shared models | TypeScript via `@shared/*` |
 | Styling | Tailwind CSS v4 + project CSS tokens/components |

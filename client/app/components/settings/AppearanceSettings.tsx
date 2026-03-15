@@ -1,28 +1,82 @@
 import { memo } from 'react';
 import type { AppSettings } from '@shared/settings';
-import { DEFAULT_APP_SETTINGS } from '@shared/settings';
-import { SectionCard, FieldRow, RangeControl, Divider, ColorControl, normalizeHex } from './SettingsUI';
+import { SectionCard, FieldRow, RangeControl, Divider, ColorControl, normalizeHex, makeResetter } from './SettingsUI';
+import { PRESETS } from './presets';
 
 interface Props {
   settings: AppSettings;
   setField: <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => void;
   updateColorField: (key: keyof AppSettings, fallback: string, nextHex?: string, nextAlpha?: number) => void;
   resetOverlayTheme: (theme: 'dark' | 'light') => void;
+  onApplyPreset: (values: Partial<AppSettings>) => void;
 }
 
-export const AppearanceSettings = memo(function AppearanceSettings({ settings, setField, updateColorField, resetOverlayTheme }: Props) {
+function getPresetSwatches(preset: (typeof PRESETS)[number]) {
+  const v = preset.values;
+  const colors: string[] = [];
+  if (v.overlayBgColor) colors.push(v.overlayBgColor.startsWith('rgba') ? '#141416' : v.overlayBgColor);
+  if (v.overlayTxColor) colors.push(v.overlayTxColor);
+  if (v.accentColor) colors.push(v.accentColor);
+  if (v.membersGradientColor1) colors.push(v.membersGradientColor1);
+  return colors.slice(0, 4);
+}
+
+export const AppearanceSettings = memo(function AppearanceSettings({ settings, setField, updateColorField, resetOverlayTheme, onApplyPreset }: Props) {
+  const reset = makeResetter(setField);
+
   return (
     <div className="flex flex-col gap-3">
+      {/* ── Preset Strip ── */}
+      <SectionCard title="Hazır Temalar" description="Hızlıca görünümü değiştirmek için bir tema seçin.">
+        <div className="grid gap-2 sm:grid-cols-2">
+          {PRESETS.map((preset) => {
+            const swatches = getPresetSwatches(preset);
+            return (
+              <button
+                key={preset.id}
+                type="button"
+                className="group flex flex-col items-start gap-1.5 rounded-xl border border-white/8 bg-surface-3 px-3.5 py-3 text-left transition hover:border-app-accent/40 hover:bg-app-accent/5"
+                onClick={() => onApplyPreset(preset.values)}
+              >
+                <div className="flex w-full items-center justify-between">
+                  <span className="text-sm font-semibold tracking-tight text-app-text transition group-hover:text-app-accent">
+                    {preset.name}
+                  </span>
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-white/5 text-xs text-app-text-muted transition group-hover:bg-app-accent/20 group-hover:text-app-accent">
+                    →
+                  </span>
+                </div>
+                <p className="text-xs leading-normal text-app-text-muted transition group-hover:text-app-text-secondary">
+                  {preset.description}
+                </p>
+                {swatches.length > 0 && (
+                  <div className="flex gap-1.5 pt-0.5">
+                    {swatches.map((c, i) => (
+                      <span
+                        key={i}
+                        className="h-3 w-3 rounded-full border border-white/10"
+                        style={{ backgroundColor: c }}
+                      />
+                    ))}
+                  </div>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </SectionCard>
+
+      {/* ── Kart Görünümü ── */}
       <SectionCard title="Kart Görünümü" description="Overlay mesaj kartının boyut ve renk ayarları.">
-        <FieldRow label="Mesaj Kartı Boyutu" hint="Seçili mesaj kartını büyütür veya küçültür." onReset={() => setField('overlayScale', DEFAULT_APP_SETTINGS.overlayScale)}>
+        <FieldRow label="Mesaj Kartı Boyutu" hint="Seçili mesaj kartını büyütür veya küçültür." onReset={reset('overlayScale')}>
           <RangeControl min={0.7} max={1.8} step={0.05} value={settings.overlayScale} displayValue={`${Math.round(settings.overlayScale * 100)}%`} onChange={(v) => setField('overlayScale', v)} />
         </FieldRow>
         <Divider />
-        <FieldRow label="Mesaj Kartı Genişliği" hint="Seçili mesaj kutusunun genişliğini belirler." onReset={() => setField('messageMaxWidth', DEFAULT_APP_SETTINGS.messageMaxWidth)}>
+        <FieldRow label="Mesaj Kartı Genişliği" hint="Seçili mesaj kutusunun genişliğini belirler." onReset={reset('messageMaxWidth')}>
           <RangeControl min={260} max={820} step={10} value={settings.messageMaxWidth} displayValue={`${settings.messageMaxWidth}px`} onChange={(v) => setField('messageMaxWidth', v)} />
         </FieldRow>
         <Divider />
-        <FieldRow label="Yazı Boyutu" hint="Overlay kartının ana yazı boyutu." onReset={() => setField('messageFontSize', DEFAULT_APP_SETTINGS.messageFontSize)}>
+        <FieldRow label="Yazı Boyutu" hint="Overlay kartının ana yazı boyutu." onReset={reset('messageFontSize')}>
           <RangeControl min={12} max={34} step={1} value={settings.messageFontSize} displayValue={`${settings.messageFontSize}px`} onChange={(v) => setField('messageFontSize', v)} />
         </FieldRow>
 
@@ -33,7 +87,7 @@ export const AppearanceSettings = memo(function AppearanceSettings({ settings, s
             hint="Sadece mesaj kartının arka planı. Geri kalan şeffaf kalır."
             onHexChange={(v) => updateColorField('overlayBgColor', 'rgba(20, 20, 22, 0.95)', v)}
             onAlphaChange={(v) => updateColorField('overlayBgColor', 'rgba(20, 20, 22, 0.95)', undefined, v)}
-            onReset={() => setField('overlayBgColor', DEFAULT_APP_SETTINGS.overlayBgColor)}
+            onReset={reset('overlayBgColor')}
           />
           <ColorControl
             label="Yazı Rengi"
@@ -41,7 +95,7 @@ export const AppearanceSettings = memo(function AppearanceSettings({ settings, s
             hint="Yüksek kontrastlı bir ön plan rengi kullanın."
             onHexChange={(v) => updateColorField('overlayTxColor', '#ffffff', v)}
             onAlphaChange={(v) => updateColorField('overlayTxColor', '#ffffff', undefined, v)}
-            onReset={() => setField('overlayTxColor', DEFAULT_APP_SETTINGS.overlayTxColor)}
+            onReset={reset('overlayTxColor')}
           />
         </div>
 
@@ -57,6 +111,7 @@ export const AppearanceSettings = memo(function AppearanceSettings({ settings, s
         </div>
       </SectionCard>
 
+      {/* ── Vurgu Rengi ── */}
       <SectionCard title="Vurgu Rengi" description="Uygulamanın genel vurgu rengini ayarlayın.">
         <ColorControl
           label="Accent Rengi"
@@ -64,7 +119,7 @@ export const AppearanceSettings = memo(function AppearanceSettings({ settings, s
           showOpacity={false}
           onHexChange={(v) => setField('accentColor', normalizeHex(v))}
           onAlphaChange={() => {}}
-          onReset={() => setField('accentColor', DEFAULT_APP_SETTINGS.accentColor)}
+          onReset={reset('accentColor')}
         />
       </SectionCard>
     </div>

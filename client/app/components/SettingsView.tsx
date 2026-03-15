@@ -4,15 +4,14 @@ import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 import type { AppSettings } from '@shared/settings';
 import { SettingsIcons } from './Icons';
-import { cn, normalizeHex, parseColorValue, serializeColor, SectionCard } from './settings/SettingsUI';
+import { cn, parseColorValue, serializeColor } from './settings/SettingsUI';
 import { AppearanceSettings } from './settings/AppearanceSettings';
 import { DisplaySettings } from './settings/DisplaySettings';
 import { SuperChatSettings } from './settings/SuperChatSettings';
 import { MembersSettings } from './settings/MembersSettings';
-import { PreviewSettings, PreviewMode, OverlayPreview } from './settings/PreviewSettings';
+import { PreviewMode, OverlayPreview } from './settings/PreviewSettings';
 import { ObsSettings } from './settings/ObsSettings';
 import { AdvancedSettings } from './settings/AdvancedSettings';
-import { PresetsSettings } from './settings/PresetsSettings';
 
 export type SettingsSaveState =
   | 'idle'
@@ -32,14 +31,13 @@ interface SettingsViewProps {
 }
 
 type SettingsSection =
-  | 'presets'
   | 'appearance'
   | 'display'
-  | 'superchat'
-  | 'members'
-  | 'preview'
+  | 'overlays'
   | 'obs'
   | 'advanced';
+
+type OverlayTab = 'superchat' | 'members';
 
 interface SectionMeta {
   id: SettingsSection;
@@ -50,15 +48,9 @@ interface SectionMeta {
 
 const SECTIONS: SectionMeta[] = [
   {
-    id: 'presets',
-    label: 'Temalar',
-    hint: 'Hazır görünümler',
-    icon: <SettingsIcons.Preview />,
-  },
-  {
     id: 'appearance',
     label: 'Görünüm',
-    hint: 'Renk ve boyut',
+    hint: 'Temalar, renk ve boyut',
     icon: <SettingsIcons.Appearance />,
   },
   {
@@ -68,22 +60,10 @@ const SECTIONS: SectionMeta[] = [
     icon: <SettingsIcons.Display />,
   },
   {
-    id: 'superchat',
-    label: 'Super Chat',
-    hint: 'Bağış ayarları',
+    id: 'overlays',
+    label: "Overlay'ler",
+    hint: 'Super Chat ve Üyelik',
     icon: <SettingsIcons.SuperChat />,
-  },
-  {
-    id: 'members',
-    label: 'Üyeler',
-    hint: 'Üyelik ayarları',
-    icon: <SettingsIcons.Members />,
-  },
-  {
-    id: 'preview',
-    label: 'Önizleme',
-    hint: 'Canlı görünüm',
-    icon: <SettingsIcons.Preview />,
   },
   {
     id: 'obs',
@@ -130,13 +110,18 @@ function NavButton({ section, active, onClick }: { section: SectionMeta; active:
     <button
       type="button"
       className={cn(
-        'mb-1 flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-sm transition',
-        active ? 'bg-white/[0.08] text-app-text' : 'text-app-text-muted hover:bg-white/[0.04] hover:text-app-text',
+        'mb-0.5 flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-sm transition',
+        active
+          ? 'border-l-[3px] border-app-accent bg-white/[0.08] text-app-text pl-[9px]'
+          : 'border-l-[3px] border-transparent text-app-text-muted hover:bg-white/[0.04] hover:text-app-text pl-[9px]',
       )}
       onClick={onClick}
     >
-      <span className={cn('shrink-0', active ? 'text-app-text' : 'text-app-text-subtle')}>{section.icon}</span>
-      <span className="font-medium">{section.label}</span>
+      <span className={cn('shrink-0', active ? 'text-app-accent' : 'text-app-text-subtle')}>{section.icon}</span>
+      <div className="min-w-0">
+        <span className="font-medium">{section.label}</span>
+        <div className="text-[10px] text-app-text-subtle leading-tight">{section.hint}</div>
+      </div>
     </button>
   );
 }
@@ -172,6 +157,32 @@ function PreviewTab({ label, active, onClick }: { mode: string; label: string; a
   );
 }
 
+function OverlayTabBar({ activeTab, onChange }: { activeTab: OverlayTab; onChange: (tab: OverlayTab) => void }) {
+  return (
+    <div className="mb-4 flex gap-1 rounded-xl border border-white/6 bg-surface-1 p-1">
+      {([
+        { id: 'superchat' as const, label: 'Super Chat', icon: <SettingsIcons.SuperChat /> },
+        { id: 'members' as const, label: 'Üyeler', icon: <SettingsIcons.Members /> },
+      ]).map((tab) => (
+        <button
+          key={tab.id}
+          type="button"
+          className={cn(
+            'flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition',
+            activeTab === tab.id
+              ? 'bg-app-accent/12 text-app-text shadow-sm'
+              : 'text-app-text-muted hover:text-app-text hover:bg-white/[0.04]',
+          )}
+          onClick={() => onChange(tab.id)}
+        >
+          <span className={cn('shrink-0', activeTab === tab.id ? 'text-app-accent' : 'text-app-text-subtle')}>{tab.icon}</span>
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // ─── Layout Tokenları ─────────────────────────────────────────────────────
 const layout = {
   nav:         'flex w-56 shrink-0 flex-col border-r border-white/6 bg-surface-1',
@@ -183,8 +194,10 @@ const layout = {
 };
 
 export default function SettingsView({ settings, onUpdate, overlayUrls, saveState }: SettingsViewProps) {
-  const [activeSection, setActiveSection] = useState<SettingsSection>('presets');
+  const [activeSection, setActiveSection] = useState<SettingsSection>('appearance');
   const [previewMode, setPreviewMode] = useState<PreviewMode>('message');
+  const [overlayTab, setOverlayTab] = useState<OverlayTab>('superchat');
+  const [showMobilePreview, setShowMobilePreview] = useState(false);
 
   const [isDesktop, setIsDesktop] = useState(false);
 
@@ -202,13 +215,8 @@ export default function SettingsView({ settings, onUpdate, overlayUrls, saveStat
   }, []);
 
   useEffect(() => {
-    if (activeSection === 'superchat') {
-      setPreviewMode('superchat');
-      return;
-    }
-
-    if (activeSection === 'members') {
-      setPreviewMode('members');
+    if (activeSection === 'overlays') {
+      setPreviewMode(overlayTab === 'superchat' ? 'superchat' : 'members');
       return;
     }
 
@@ -217,10 +225,10 @@ export default function SettingsView({ settings, onUpdate, overlayUrls, saveStat
       return;
     }
 
-    if (activeSection === 'appearance' || activeSection === 'obs' || activeSection === 'presets') {
+    if (activeSection === 'appearance' || activeSection === 'obs') {
       setPreviewMode('message');
     }
-  }, [activeSection]);
+  }, [activeSection, overlayTab]);
 
   const setField = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
     onUpdate({ ...settings, [key]: value });
@@ -252,18 +260,20 @@ export default function SettingsView({ settings, onUpdate, overlayUrls, saveStat
 
   const renderContent = () => {
     switch (activeSection) {
-      case 'presets':
-        return <PresetsSettings settings={settings} onApplyPreset={applyPreset} />;
       case 'appearance':
-        return <AppearanceSettings settings={settings} setField={setField} updateColorField={updateColorField} resetOverlayTheme={resetOverlayTheme} />;
+        return <AppearanceSettings settings={settings} setField={setField} updateColorField={updateColorField} resetOverlayTheme={resetOverlayTheme} onApplyPreset={applyPreset} />;
       case 'display':
         return <DisplaySettings settings={settings} setField={setField} />;
-      case 'superchat':
-        return <SuperChatSettings settings={settings} setField={setField} updateColorField={updateColorField} />;
-      case 'members':
-        return <MembersSettings settings={settings} setField={setField} updateColorField={updateColorField} />;
-      case 'preview':
-        return <PreviewSettings settings={settings} previewMode={previewMode} setPreviewMode={setPreviewMode} />;
+      case 'overlays':
+        return (
+          <>
+            <OverlayTabBar activeTab={overlayTab} onChange={setOverlayTab} />
+            {overlayTab === 'superchat'
+              ? <SuperChatSettings settings={settings} setField={setField} updateColorField={updateColorField} />
+              : <MembersSettings settings={settings} setField={setField} updateColorField={updateColorField} />
+            }
+          </>
+        );
       case 'obs':
         return <ObsSettings settings={settings} setField={setField} overlayUrls={overlayUrls} />;
       case 'advanced':
@@ -272,7 +282,6 @@ export default function SettingsView({ settings, onUpdate, overlayUrls, saveStat
   };
 
   const currentSection = SECTIONS.find((s) => s.id === activeSection)!;
-  const showDesktopPreviewRail = activeSection !== 'preview';
 
   return (
     <div className="flex h-full">
@@ -312,24 +321,22 @@ export default function SettingsView({ settings, onUpdate, overlayUrls, saveStat
               </div>
             </div>
 
-            {showDesktopPreviewRail ? (
-              <aside className={layout.preview} style={{ height: '100%' }}>
-                <div className={layout.previewTabs}>
-                  {PREVIEW_MODES.map(({ id, label }) => (
-                    <PreviewTab
-                      key={id}
-                      mode={id}
-                      label={label}
-                      active={previewMode === id}
-                      onClick={() => setPreviewMode(id)}
-                    />
-                  ))}
-                </div>
-                <div className="flex-1 overflow-y-auto p-4">
-                  <OverlayPreview settings={settings} previewMode={previewMode} />
-                </div>
-              </aside>
-            ) : null}
+            <aside className={layout.preview} style={{ height: '100%' }}>
+              <div className={layout.previewTabs}>
+                {PREVIEW_MODES.map(({ id, label }) => (
+                  <PreviewTab
+                    key={id}
+                    mode={id}
+                    label={label}
+                    active={previewMode === id}
+                    onClick={() => setPreviewMode(id)}
+                  />
+                ))}
+              </div>
+              <div className="flex-1 overflow-y-auto p-4">
+                <OverlayPreview settings={settings} previewMode={previewMode} />
+              </div>
+            </aside>
           </div>
         </>
       ) : (
@@ -362,6 +369,49 @@ export default function SettingsView({ settings, onUpdate, overlayUrls, saveStat
               {renderContent()}
             </div>
           </div>
+
+          {/* Mobil Önizleme FAB */}
+          <button
+            type="button"
+            className="fixed bottom-5 right-5 z-50 flex h-12 w-12 items-center justify-center rounded-full border border-app-accent/30 bg-app-accent/90 text-white shadow-lg shadow-app-accent/20 transition hover:bg-app-accent active:scale-95"
+            onClick={() => setShowMobilePreview(true)}
+            title="Önizleme"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+          </button>
+
+          {/* Mobil Önizleme Modal */}
+          {showMobilePreview && (
+            <div className="fixed inset-0 z-50 flex flex-col bg-app-bg/95 backdrop-blur-sm">
+              <div className="flex items-center justify-between border-b border-white/6 bg-surface-1 px-4 py-3">
+                <span className="text-sm font-semibold text-app-text">Önizleme</span>
+                <button
+                  type="button"
+                  className="rounded-lg border border-white/8 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-app-text-muted transition hover:text-app-text"
+                  onClick={() => setShowMobilePreview(false)}
+                >
+                  Kapat
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5 border-b border-white/6 bg-surface-1 p-3">
+                {PREVIEW_MODES.map(({ id, label }) => (
+                  <PreviewTab
+                    key={id}
+                    mode={id}
+                    label={label}
+                    active={previewMode === id}
+                    onClick={() => setPreviewMode(id)}
+                  />
+                ))}
+              </div>
+              <div className="flex-1 overflow-y-auto p-4">
+                <OverlayPreview settings={settings} previewMode={previewMode} />
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
